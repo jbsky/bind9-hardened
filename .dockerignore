@@ -1,0 +1,5 @@
+.git
+.github
+.gitlab-ci.yml
+*.md
+LICENSE
