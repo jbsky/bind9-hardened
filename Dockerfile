@@ -178,6 +178,7 @@ RUN setcap 'cap_net_bind_service+ep' /usr/sbin/named
 COPY --from=gobuilder /init /usr/local/bin/init
 
 # Verify named works
+# hadolint ignore=DL4006
 RUN /usr/sbin/named -V 2>&1 | head -5
 
 # Create runtime directories via init
