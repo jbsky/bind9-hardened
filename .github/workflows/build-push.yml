@@ -1,0 +1,217 @@
+# =====================================================================
+#  Build & Push – BIND9 Hardened
+#  Multi-stage FROM scratch → ghcr.io + Docker Hub
+#  Lint + Build + Sign (cosign OIDC) + Scan (Trivy) + Release
+# =====================================================================
+name: build-push
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'Dockerfile'
+      - 'init.go'
+      - 'go.mod'
+      - 'versions.json'
+      - '.github/workflows/build-push.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  NAMESPACE: ${{ github.repository_owner }}
+  IMAGE_NAME: bind9-hardened
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+  attestations: write
+
+jobs:
+  # -------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  # -------------------------------------------------------------------
+  build:
+    name: Build & Push
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read versions
+        id: versions
+        run: |
+          set -euo pipefail
+          BIND_VER=$(jq -r '.bind' versions.json)
+          echo "bind=${BIND_VER}" >> "$GITHUB_OUTPUT"
+          echo "### Resolved versions" >> "$GITHUB_STEP_SUMMARY"
+          echo "- BIND: ${BIND_VER}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: image=moby/buildkit:latest
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Docker Hub credentials
+        id: dockerhub
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login Docker Hub
+        if: steps.dockerhub.outputs.available == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute Docker Hub image name
+        id: dockerhub-image
+        if: steps.dockerhub.outputs.available == 'true'
+        env:
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: echo "image=docker.io/${DOCKERHUB_NS}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
+            ${{ steps.dockerhub-image.outputs.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.versions.outputs.bind }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.version=${{ steps.versions.outputs.bind }}
+          cache-from: type=gha,scope=bind9
+          cache-to: type=gha,mode=max,scope=bind9
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (OIDC keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          HAS_DOCKERHUB: ${{ steps.dockerhub.outputs.available }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            COSIGN_REPOSITORY="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}" \
+              cosign sign --yes "docker.io/${DOCKERHUB_NS}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          fi
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-bind9.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-bind9.sarif
+          category: bind9
+
+      - name: GitHub SLSA Attestation
+        if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        env:
+          HAS_DOCKERHUB: ${{ steps.dockerhub.outputs.available }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          echo "### bind9-hardened" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            echo "docker pull docker.io/${DOCKERHUB_NS}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # -------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Tarball + checksums
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          tar --exclude='.git' --exclude='dist' \
+              -czf "dist/bind9-hardened-${VERSION}.tar.gz" \
+              --transform "s,^,bind9-hardened-${VERSION}/," \
+              $(ls -A | grep -v -E '^(\.git|dist)$')
+          cd dist
+          sha256sum "bind9-hardened-${VERSION}.tar.gz" > "bind9-hardened-${VERSION}.sha256"
+          sha512sum "bind9-hardened-${VERSION}.tar.gz" > "bind9-hardened-${VERSION}.sha512"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            dist/bind9-hardened-${{ github.ref_name }}.tar.gz
+            dist/bind9-hardened-${{ github.ref_name }}.sha256
+            dist/bind9-hardened-${{ github.ref_name }}.sha512

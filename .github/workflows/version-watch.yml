@@ -1,0 +1,80 @@
+# =====================================================================
+#  Version Watch — ISC BIND 9.20.x upstream release detection
+#
+#  Quotidien 06h00 UTC :
+#    1. Check ISC downloads for new 9.20.x stable version
+#    2. Compare with versions.json
+#    3. If update available: bump versions.json + Dockerfile ARG → commit → push
+# =====================================================================
+name: version-watch
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check & bump BIND version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check upstream version
+        id: check
+        run: |
+          set -euo pipefail
+
+          CURRENT=$(jq -r '.bind' versions.json)
+          echo "current=${CURRENT}"
+
+          # Fetch ISC downloads page and find latest 9.20.x
+          LATEST=$(curl -fsSL https://downloads.isc.org/isc/bind9/ \
+            | grep -oP '9\.20\.\d+' \
+            | sort -V \
+            | tail -1)
+
+          if [ -z "$LATEST" ]; then
+            echo "Could not determine latest BIND 9.20 version"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "latest=${LATEST}"
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Already up to date (${CURRENT})"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Update available: ${CURRENT} → ${LATEST}"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
+            echo "previous=${CURRENT}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump versions
+        if: steps.check.outputs.updated == 'true'
+        env:
+          NEW_VER: ${{ steps.check.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          jq --arg v "$NEW_VER" '.bind = $v' versions.json > versions.json.tmp
+          mv versions.json.tmp versions.json
+
+          sed -i "s/^ARG BIND_VERSION=.*/ARG BIND_VERSION=${NEW_VER}/" Dockerfile
+
+          echo "Updated to BIND ${NEW_VER}"
+          cat versions.json
+
+      - name: Commit & push
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json Dockerfile
+          git commit -m "chore(deps): bump bind ${{ steps.check.outputs.previous }} → ${{ steps.check.outputs.version }}"
+          git push
