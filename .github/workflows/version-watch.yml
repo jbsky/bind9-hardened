@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   check:
@@ -78,3 +79,12 @@ jobs:
           git add versions.json Dockerfile
           git commit -m "chore(deps): bump bind ${{ steps.check.outputs.previous }} → ${{ steps.check.outputs.version }}"
           git push
+
+      - name: Trigger build-push
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A push made with GITHUB_TOKEN does not trigger `on: push` workflows
+          # (anti-recursion protection). Explicitly dispatch build-push instead.
+          gh workflow run build-push.yml --ref main

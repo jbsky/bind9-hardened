@@ -35,7 +35,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
         build-base \
         pkgconf \
         perl \
-        linux-headers
+        linux-headers \
+        gnupg
 
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
@@ -51,9 +52,17 @@ RUN --mount=type=cache,target=/var/cache/apk \
         zlib-dev \
         libcap-dev
 
-# Download BIND source (ISC official tarball)
+# Download BIND source + PGP detached signature (ISC official tarball)
 ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz /tmp/bind.tar.xz
-RUN tar -xf /tmp/bind.tar.xz -C /tmp && rm /tmp/bind.tar.xz
+ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz.asc /tmp/bind.tar.xz.asc
+COPY keys/isc-keyblock.asc /tmp/isc-keyblock.asc
+
+# Verify tarball authenticity against ISC's pinned code-signing keys
+# (key block fetched from https://www.isc.org/docs/isc-keyblock.asc, committed to repo)
+RUN gpg --import /tmp/isc-keyblock.asc && \
+    gpg --verify /tmp/bind.tar.xz.asc /tmp/bind.tar.xz && \
+    tar -xf /tmp/bind.tar.xz -C /tmp && \
+    rm -rf /tmp/bind.tar.xz /tmp/bind.tar.xz.asc /tmp/isc-keyblock.asc /root/.gnupg
 
 WORKDIR /tmp/bind-${BIND_VERSION}
 
