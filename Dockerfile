@@ -4,6 +4,10 @@
 #
 # Tier: Platine (FROM scratch, non-root, setcap, binary healthcheck)
 # ============================================================================
+# ALPINE_VERSION / GO_VERSION kept for check-versions.sh reference only --
+# the FROM lines below pin tag+digest together as a literal so a version
+# bump requires deliberately re-resolving the digest, not a silent drift
+# if these ARGs change without the pins being updated to match.
 ARG ALPINE_VERSION=3.21
 ARG BIND_VERSION=9.20.24
 ARG GO_VERSION=1.26
@@ -11,7 +15,7 @@ ARG GO_VERSION=1.26
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
 # ============================================================================
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
 
 ARG BIND_VERSION
 
@@ -135,7 +139,7 @@ RUN rm -rf /out/usr/include /out/usr/share/man /out/usr/share/doc \
 # ============================================================================
 # Stage 2: Go builder -- init binary (healthcheck + entrypoint + setup-dirs)
 # ============================================================================
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS gobuilder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS gobuilder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -147,7 +151,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags='-s -w
 # ============================================================================
 # Stage 3: prep -- assemble complete runtime filesystem
 # ============================================================================
-FROM alpine:${ALPINE_VERSION} AS prep
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
 
 ARG BIND_VERSION
 
