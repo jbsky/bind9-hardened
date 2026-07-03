@@ -145,6 +145,13 @@ func healthcheck() int {
 		return 1
 	}
 
+	// Verify: response ID matches the query ID (0xBE9D)
+	id := binary.BigEndian.Uint16(buf[0:2])
+	if id != 0xBE9D {
+		fmt.Fprintf(os.Stderr, "[healthcheck] unexpected response ID (0x%04x)\n", id)
+		return 1
+	}
+
 	// Verify: QR bit set (bit 15 of flags word) = this is a response
 	flags := binary.BigEndian.Uint16(buf[2:4])
 	if flags>>15 != 1 {

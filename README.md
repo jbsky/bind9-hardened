@@ -41,7 +41,7 @@ docker run -d --name bind9 \
 | Variable d'env | Default | Description |
 |---------------|---------|-------------|
 | `NAMED_CONF` | `/etc/bind/named.conf` | Chemin du fichier de config |
-| `TZ` | `UTC` | Timezone |
+| `TZ` | `Europe/Paris` | Timezone |
 
 ## Healthcheck
 
@@ -49,12 +49,22 @@ Le Go init effectue une **requete DNS UDP reelle** vers `127.0.0.1:53` (CH TXT v
 
 Accepte toute reponse DNS valide (QR=1), meme REFUSED (quand `version "not disclosed"` est configure).
 
+## Tests
+
+```bash
+./scripts/test.sh bind9-hardened:9.20.24 15353
+```
+
+Lance un container jetable (config minimale, cache chown 5300) et verifie : demarrage, `named-checkconf` (config valide acceptee, invalide rejetee), statut `healthy`, healthcheck interne, et une vraie requete DNS UDP externe. Necessite `docker` + `python3`.
+
 ## Architecture du repo
 
 ```
 bind9-hardened/
 ├── Dockerfile          # Multi-stage 4 stages (builder → gobuilder → prep → scratch)
 ├── go.mod + init.go    # Go static init (healthcheck DNS + checkconf + entrypoint)
+├── keys/               # Cle PGP ISC pinnee (verification tarball source)
+├── scripts/test.sh     # Smoke tests
 └── .dockerignore
 ```
 

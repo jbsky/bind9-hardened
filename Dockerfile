@@ -102,9 +102,9 @@ RUN if [ -f configure ]; then \
     fi
 
 # Strip binaries and shared libraries
-RUN find /out -type f -name '*.a' -delete 2>/dev/null; \
-    find /out -type f \( -executable -o -name '*.so*' \) -exec strip --strip-unneeded {} + 2>/dev/null; \
-    true
+# (.la libtool archives are plain text, not ELF -- delete before strip, not after)
+RUN find /out -type f \( -name '*.a' -o -name '*.la' \) -delete && \
+    find /out -type f \( -executable -o -name '*.so*' \) -exec strip --strip-unneeded {} +
 
 # Remove unnecessary binaries (keep only named + named-checkconf)
 RUN rm -f \
@@ -126,12 +126,11 @@ RUN rm -f \
     /out/usr/sbin/dnssec-settime /out/usr/sbin/dnssec-signzone \
     /out/usr/sbin/dnssec-verify \
     /out/usr/bin/named-journalprint /out/usr/sbin/named-journalprint \
-    /out/usr/bin/named-compilezone /out/usr/sbin/named-compilezone \
-    2>/dev/null; true
+    /out/usr/bin/named-compilezone /out/usr/sbin/named-compilezone
 
 # Remove headers, man pages, docs, pkgconfig
 RUN rm -rf /out/usr/include /out/usr/share/man /out/usr/share/doc \
-    /out/usr/lib/pkgconfig /out/usr/lib/cmake 2>/dev/null; true
+    /out/usr/lib/pkgconfig /out/usr/lib/cmake
 
 # ============================================================================
 # Stage 2: Go builder -- init binary (healthcheck + entrypoint + setup-dirs)
@@ -213,7 +212,8 @@ LABEL org.opencontainers.image.title="bind9-hardened" \
       org.opencontainers.image.licenses="MPL-2.0" \
       org.opencontainers.image.source="https://github.com/jbsky/bind9-hardened" \
       org.opencontainers.image.version="${BIND_VERSION}" \
-      security.hardening.tier="platine"
+      security.hardening.tier="platine" \
+      versions="bind=${BIND_VERSION}"
 
 # 1. System identity files
 COPY --link --from=prep /etc/passwd /etc/group /etc/
