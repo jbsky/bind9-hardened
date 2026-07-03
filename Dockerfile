@@ -136,11 +136,14 @@ RUN rm -rf /out/usr/include /out/usr/share/man /out/usr/share/doc \
 # ============================================================================
 # Stage 2: Go builder -- init binary (healthcheck + entrypoint + setup-dirs)
 # ============================================================================
-FROM golang:${GO_VERSION}-alpine AS gobuilder
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS gobuilder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /src
 COPY go.mod init.go ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -trimpath -o /init .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags='-s -w' -trimpath -o /init .
 
 # ============================================================================
 # Stage 3: prep -- assemble complete runtime filesystem
@@ -219,8 +222,9 @@ COPY --link --from=prep /etc/passwd /etc/group /etc/
 COPY --link --from=prep /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
-# 3. Dynamic linker (musl)
-COPY --link --from=prep /lib/ld-musl-x86_64.so.1 /lib/
+# 3. Dynamic linker (musl) -- copy whole dir: filename is arch-specific
+# (ld-musl-x86_64.so.1 vs ld-musl-aarch64.so.1), needed for multi-platform builds
+COPY --link --from=prep /lib/ /lib/
 
 # 4. Runtime shared libraries (system deps + BIND internal libs)
 COPY --link --from=prep /usr/lib/ /usr/lib/
