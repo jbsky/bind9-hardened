@@ -42,12 +42,14 @@ RUN --mount=type=cache,target=/var/cache/apk \
         linux-headers \
         gnupg
 
+# hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         openssl-dev \
         libuv-dev \
         userspace-rcu-dev
 
+# hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         libxml2-dev \
@@ -89,7 +91,7 @@ RUN if [ -f configure ]; then \
             --without-libidn2 \
             --without-readline \
             --without-cmocka && \
-        make -j$(nproc) && \
+        make -j"$(nproc)" && \
         make install DESTDIR=/out; \
     elif [ -f meson.build ]; then \
         echo "=== Building BIND ${BIND_VERSION} with meson ===" && \
@@ -110,7 +112,8 @@ RUN if [ -f configure ]; then \
 RUN find /out -type f \( -name '*.a' -o -name '*.la' \) -delete && \
     find /out -type f \( -executable -o -name '*.so*' \) -exec strip --strip-unneeded {} +
 
-# Remove unnecessary binaries (keep only named + named-checkconf)
+# Remove unnecessary binaries (keep only named + named-checkconf), then
+# headers/man pages/docs/pkgconfig
 RUN rm -f \
     /out/usr/bin/nsupdate /out/usr/bin/dig /out/usr/bin/host \
     /out/usr/bin/nslookup /out/usr/bin/delv /out/usr/bin/mdig \
@@ -130,10 +133,8 @@ RUN rm -f \
     /out/usr/sbin/dnssec-settime /out/usr/sbin/dnssec-signzone \
     /out/usr/sbin/dnssec-verify \
     /out/usr/bin/named-journalprint /out/usr/sbin/named-journalprint \
-    /out/usr/bin/named-compilezone /out/usr/sbin/named-compilezone
-
-# Remove headers, man pages, docs, pkgconfig
-RUN rm -rf /out/usr/include /out/usr/share/man /out/usr/share/doc \
+    /out/usr/bin/named-compilezone /out/usr/sbin/named-compilezone \
+    && rm -rf /out/usr/include /out/usr/share/man /out/usr/share/doc \
     /out/usr/lib/pkgconfig /out/usr/lib/cmake
 
 # ============================================================================
@@ -199,7 +200,10 @@ RUN /usr/sbin/named -V 2>&1 | head -5
 # Create runtime directories via init
 RUN /usr/local/bin/init --setup-dirs
 
-# Clean up build-only tools (won't be in FROM scratch anyway)
+# Clean up build-only tools (won't be in FROM scratch anyway). Kept as its
+# own step (not merged with the verify/setup-dirs RUNs above) so a failure
+# in any one of the three points at exactly which failed.
+# hadolint ignore=DL3059
 RUN rm -rf /var/cache/apk/* /usr/lib/pkgconfig /usr/lib/cmake
 
 # ============================================================================
