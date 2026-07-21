@@ -90,9 +90,23 @@ jobs:
           cache-to: type=gha,mode=max,scope=bind9
 
   # -------------------------------------------------------------------
+  test:
+    name: Functional tests
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build test image
+        run: docker build -t bind9-hardened:test .
+
+      - name: Run smoke tests
+        run: ./scripts/test.sh bind9-hardened:test
+
+  # -------------------------------------------------------------------
   build:
     name: Build & Push
-    needs: lint
+    needs: [lint, test]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     outputs:
