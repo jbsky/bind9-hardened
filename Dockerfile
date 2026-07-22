@@ -67,6 +67,7 @@ COPY keys/isc-keyblock.asc /tmp/isc-keyblock.asc
 # (key block fetched from https://www.isc.org/docs/isc-keyblock.asc, committed to repo)
 RUN gpg --import /tmp/isc-keyblock.asc && \
     gpg --verify /tmp/bind.tar.xz.asc /tmp/bind.tar.xz && \
+    gpgconf --kill gpg-agent && \
     tar -xf /tmp/bind.tar.xz -C /tmp && \
     rm -rf /tmp/bind.tar.xz /tmp/bind.tar.xz.asc /tmp/isc-keyblock.asc /root/.gnupg
 
