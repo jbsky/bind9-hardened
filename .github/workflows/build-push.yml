@@ -200,6 +200,22 @@ jobs:
         if: env.PUBLISH != 'true'
         run: docker load -i /tmp/image-tar/image.tar
 
+      # A version tag that does not match the binary inside is the one
+      # failure nothing else here catches: php shipped 8.5.8 under an 8.5.9
+      # tag for 18 days because only the FROM tag was rewritten, never the
+      # digest. Ask the built image what it is, and refuse to publish if it
+      # disagrees with what we are about to call it.
+      - name: Assert the image is the BIND version we tag it with
+        run: |
+          set -euo pipefail
+          want=$(jq -r .bind versions.json)
+          got=$(docker run --rm --entrypoint named bind9-hardened:test -v 2>&1 | grep -oP 'BIND \K[0-9][0-9.]*')
+          echo "declared: ${want} | image: ${got}"
+          if [ "$want" != "$got" ]; then
+            echo "::error::image ships BIND ${got} but would be published as ${want}"
+            exit 1
+          fi
+
       - name: Run smoke tests
         run: ./scripts/test.sh bind9-hardened:test
 
