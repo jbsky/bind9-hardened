@@ -268,7 +268,11 @@ jobs:
       digest: ${{ steps.manifest.outputs.digest }}
 
     steps:
+      # fetch-depth 0: build-revision.sh counts commits, a shallow clone
+      # would silently make every build .0
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Read versions
         id: versions
@@ -312,6 +316,15 @@ jobs:
           DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
         run: echo "image=docker.io/${DOCKERHUB_NS}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
 
+      - name: Compute build revision
+        id: revision
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.versions.outputs.bind }}"
+          REVISION=$(./scripts/build-revision.sh bind Dockerfile init.go go.mod versions.json)
+          echo "tag=${VERSION}.${REVISION}" >> "$GITHUB_OUTPUT"
+          echo "- Build revision: ${VERSION}.${REVISION}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -320,6 +333,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
             ${{ steps.dockerhub-image.outputs.image }}
           tags: |
+            type=raw,value=${{ steps.revision.outputs.tag }}
             type=semver,pattern={{version}}
             type=raw,value=${{ steps.versions.outputs.bind }}
             type=raw,value=latest,enable={{is_default_branch}}
