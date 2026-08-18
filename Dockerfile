@@ -8,14 +8,14 @@
 # the FROM lines below pin tag+digest together as a literal so a version
 # bump requires deliberately re-resolving the digest, not a silent drift
 # if these ARGs change without the pins being updated to match.
-ARG ALPINE_VERSION=3.21
+ARG ALPINE_VERSION=3.24
 ARG BIND_VERSION=9.20.26
 ARG GO_VERSION=1.26
 
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
 # ============================================================================
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
 ARG BIND_VERSION
 
@@ -153,7 +153,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags='-s -w
 # ============================================================================
 # Stage 3: prep -- assemble complete runtime filesystem
 # ============================================================================
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS prep
 
 ARG BIND_VERSION
 
