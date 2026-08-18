@@ -12,6 +12,26 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    # Every action here is referenced by its floating major tag (@v4, @v7...),
+    # so patch and minor releases are already picked up at run time. A PR that
+    # rewrites the ref to an exact patch does not upgrade anything -- it pins,
+    # and then every upstream patch generates another PR forever. Only a new
+    # major needs a PR here.
+    #
+    # hadolint/ and aquasecurity/ are deliberately NOT ignored: those two are
+    # pinned to a full semver on purpose, so their patch/minor bumps do need a
+    # PR to reach us (hadolint 3.3.0 -> 3.4.0 was one).
+    ignore:
+      - dependency-name: "actions/*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "docker/*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "github/*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "sigstore/*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "softprops/*"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
 
   - package-ecosystem: "gomod"
     directory: "/"
