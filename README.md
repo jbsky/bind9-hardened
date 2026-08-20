@@ -29,7 +29,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
 |-------|---------------|-------------------------|
-| `jbsky/bind9-hardened` | `9.20.26` | `9.20.26.3` |
+| `jbsky/bind9-hardened` | `9.20.27` | `9.20.27.0` |
 <!-- END:tags -->
 
 Le compteur compte les commits qui touchent les inputs de l'image (`Dockerfile`, `init.go`, `go.mod`, `versions.json`)
