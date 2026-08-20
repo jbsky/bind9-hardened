@@ -4,7 +4,7 @@
 [![Docker Hub](https://img.shields.io/docker/v/jbsky/bind9-hardened?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/jbsky/bind9-hardened)
 [![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/bind9-hardened#security--verification)
 
-Image Docker ISC BIND 9.20.24 hardenee (FROM scratch, Go init, tini PID 1), optimisee pour deploiement VyOS Podman.
+Image Docker ISC BIND 9.20.26 hardenee (FROM scratch, Go init, tini PID 1), optimisee pour deploiement VyOS Podman.
 
 ## Features
 
@@ -18,12 +18,28 @@ Image Docker ISC BIND 9.20.24 hardenee (FROM scratch, Go init, tini PID 1), opti
 | 19 MB | vs ~150 MB image Ubuntu upstream |
 | DNSSEC validation | Trust anchors compiles dans le binaire |
 
-## Image
+## Tags
 
-| Registry | Tag | Taille |
-|----------|-----|--------|
-| `docker.io/jbsky/bind9-hardened` | `9.20.24` | 19 MB |
-| `ghcr.io/jbsky/bind9-hardened` | `9.20.24` | 19 MB |
+Trois tags par image : `latest` (dernier build de `main`), la version amont
+seule, et la version amont suffixee d'un **compteur de revision**. Les deux
+premiers sont **reecrits en place** a chaque rebuild -- bump Alpine, correctif
+CVE, changement de config -- et le build qu'ils designaient devient alors
+inaccessible. **En production, epinglez le tag qui porte le compteur.**
+
+<!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
+| Image | Version amont | Tag immuable a epingler |
+|-------|---------------|-------------------------|
+| `jbsky/bind9-hardened` | `9.20.26` | `9.20.26.3` |
+<!-- END:tags -->
+
+Le compteur compte les commits qui touchent les inputs de l'image (`Dockerfile`, `init.go`, `go.mod`, `versions.json`)
+depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
+version amont. Un commit qui ne touche que la CI ne l'incremente pas.
+
+Les deux registres, `docker.io` et `ghcr.io`, publient les memes tags avec le
+meme digest.
+
+L'image finale fait ~19 MB (`FROM scratch`).
 
 ## Usage rapide
 
@@ -33,7 +49,7 @@ docker run -d --name bind9 \
   -v /path/to/config:/etc/bind \
   -v /path/to/cache:/var/cache/bind \
   -p 53:53/udp -p 53:53/tcp \
-  jbsky/bind9-hardened:9.20.24
+  jbsky/bind9-hardened:9.20.26.3
 ```
 
 ## Configuration
@@ -52,7 +68,7 @@ Accepte toute reponse DNS valide (QR=1), meme REFUSED (quand `version "not discl
 ## Tests
 
 ```bash
-./scripts/test.sh bind9-hardened:9.20.24 15353
+./scripts/test.sh jbsky/bind9-hardened:9.20.26.3 15353
 ```
 
 Lance un container jetable (config minimale, cache chown 5300) et verifie : demarrage, `named-checkconf` (config valide acceptee, invalide rejetee), statut `healthy`, healthcheck interne, et une vraie requete DNS UDP externe. Necessite `docker` + `python3`.
@@ -71,7 +87,7 @@ bind9-hardened/
 ## Build multi-stage
 
 ```
-Stage 1: builder      → Compile ISC BIND 9.20.24 from source (autoconf, hardening flags)
+Stage 1: builder      → Compile ISC BIND 9.20.26 from source (autoconf, hardening flags)
 Stage 2: gobuilder    → CGO_ENABLED=0 Go static init binary
 Stage 3: prep         → Runtime libs + tini + user 5300 + setcap cap_net_bind_service
 Stage 4: FROM scratch → Assemblage final (named + named-checkconf + init + tini = 19 MB)
@@ -89,7 +105,7 @@ Stage 4: FROM scratch → Assemblage final (named + named-checkconf + init + tin
 ## Deploiement VyOS
 
 ```
-set container name bind9 image docker.io/jbsky/bind9-hardened:9.20.24
+set container name bind9 image docker.io/jbsky/bind9-hardened:9.20.26.3
 set container name bind9 capability net-bind-service
 set container name bind9 network bind9 address 172.20.2.10
 set container name bind9 volume bind-conf source /config/containers/bind9
@@ -102,7 +118,7 @@ set container name bind9 volume bind-cache destination /var/cache/bind
 
 ```bash
 # Verifier la signature cosign (OIDC keyless)
-cosign verify ghcr.io/jbsky/bind9-hardened:9.20.24 \
+cosign verify ghcr.io/jbsky/bind9-hardened:9.20.26.3 \
   --certificate-identity-regexp '^https://github.com/jbsky/bind9-hardened/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
