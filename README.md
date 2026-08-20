@@ -34,7 +34,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 
 Le compteur compte les commits qui touchent les inputs de l'image (`Dockerfile`, `init.go`, `go.mod`, `versions.json`)
 depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
-version amont. Un commit qui ne touche que la CI ne l'incremente pas.
+version amont. Un commit qui ne touche que `.github/` ne l'incremente pas.
 
 Les deux registres, `docker.io` et `ghcr.io`, publient les memes tags avec le
 meme digest.
