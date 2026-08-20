@@ -9,7 +9,7 @@
 # bump requires deliberately re-resolving the digest, not a silent drift
 # if these ARGs change without the pins being updated to match.
 ARG ALPINE_VERSION=3.24
-ARG BIND_VERSION=9.20.26
+ARG BIND_VERSION=9.20.27
 ARG GO_VERSION=1.26
 
 # ============================================================================
