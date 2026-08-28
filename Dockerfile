@@ -11,6 +11,10 @@
 ARG ALPINE_VERSION=3.24
 ARG BIND_VERSION=9.20.27
 ARG GO_VERSION=1.26
+# jemalloc est compile depuis les sources, pas installe via apk : voir la note
+# devant sa compilation dans le stage builder.
+ARG JEMALLOC_VERSION=5.3.1
+ARG JEMALLOC_SHA256=3826bc80232f22ed5c4662f3034f799ca316e819103bdc7bb99018a421706f92
 
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
@@ -54,9 +58,47 @@ RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         libxml2-dev \
         json-c-dev \
-        jemalloc-dev \
         zlib-dev \
-        libcap-dev
+        libcap-dev \
+        curl
+
+# --- jemalloc, compile depuis les sources ---
+#
+# Le paquet Alpine est construit avec le support C++ (surcharges de new/delete),
+# ce qui fait de libjemalloc le SEUL consommateur de libstdc++ de cette image :
+# 2,8 Mo de C++ embarques pour un allocateur ecrit en C. `--disable-cxx` les
+# supprime, et libgcc_s part avec puisque plus rien ne l'appelle.
+#
+# jemalloc s'installe NON STRIPPE (il compile en -g3 par defaut) : 6,1 Mo au
+# lieu de 818 Ko. Une bibliotheque compilee depuis les sources n'herite
+# d'aucun strip, contrairement a un paquet Alpine -- le faire explicitement.
+#
+# jemalloc ne publie ni signature ni hash amont : le sha256 est epingle ici,
+# comme pour les autres tarballs non signes. Le canal a ete valide en
+# comparant le sha512 de la 5.3.0 telechargee sur GitHub a celui qu'Alpine
+# verifie de son cote -- identique octet pour octet.
+#
+# CFLAGS/LDFLAGS sont redefinis pour cette compilation seule : le stage porte
+# `-fPIE` et `-pie` pour les executables de BIND, mais jemalloc produit une
+# bibliotheque PARTAGEE. `-pie` sur un lien `-shared` fait tirer Scrt1.o au
+# linker, qui reclame alors un `main` inexistant. -fPIC suffit et est correct
+# des deux cotes.
+ARG JEMALLOC_VERSION
+ARG JEMALLOC_SHA256
+WORKDIR /tmp/jemalloc
+RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
+ && export LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack" \
+ && curl -fsSL "https://github.com/jemalloc/jemalloc/releases/download/${JEMALLOC_VERSION}/jemalloc-${JEMALLOC_VERSION}.tar.bz2" \
+      -o /tmp/jemalloc.tar.bz2 \
+ && printf '%s  /tmp/jemalloc.tar.bz2\n' "${JEMALLOC_SHA256}" > /tmp/jemalloc.sha256 \
+ && sha256sum -c /tmp/jemalloc.sha256 \
+ && tar -xjf /tmp/jemalloc.tar.bz2 -C /tmp/jemalloc --strip-components=1 \
+ && ./configure --prefix=/usr --disable-cxx --disable-static --disable-doc \
+ && make -j"$(nproc)" \
+ && make install \
+ && test ! -e /usr/lib/libjemalloc.a \
+ && strip --strip-unneeded /usr/lib/libjemalloc.so.2 \
+ && rm -rf /tmp/jemalloc /tmp/jemalloc.tar.bz2 /tmp/jemalloc.sha256
 
 # Download BIND source + PGP detached signature (ISC official tarball)
 ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz /tmp/bind.tar.xz
@@ -176,7 +218,6 @@ RUN --mount=type=cache,target=/var/cache/apk \
         libssl3 \
         libxml2 \
         json-c \
-        jemalloc \
         zlib \
         libcap2 \
         userspace-rcu
@@ -187,6 +228,9 @@ RUN addgroup -g 5300 -S named && \
 
 # Copy BIND binaries and internal shared libraries from builder
 COPY --from=builder /out/ /
+# jemalloc est compile dans le builder (voir la note la-bas), pas installe par
+# apk ici : sa bibliotheque partagee doit donc etre reprise explicitement.
+COPY --from=builder /usr/lib/libjemalloc.so* /usr/lib/
 
 # Set file capability for binding port 53 as non-root
 RUN setcap 'cap_net_bind_service+ep' /usr/sbin/named
@@ -216,14 +260,26 @@ RUN rm -rf /var/cache/apk/* /usr/lib/pkgconfig /usr/lib/cmake
 # lddtree -l prints the binary, its transitive dependencies, symlinks together
 # with their targets, and the real loader for the architecture being built, so
 # nothing here hardcodes ld-musl-x86_64.so.1 and arm64 keeps working.
+#
+# The "Not found" guard is not decoration: lddtree reports a missing library on
+# stderr and still EXITS 0. Without it, a library that stops being installed --
+# jemalloc now comes from the builder rather than from apk, exactly this case --
+# would ship a closure with a hole in it, and the failure would only surface at
+# container start.
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache lddtree \
  && mkdir -p /rootfs \
- && lddtree -l /usr/sbin/named /usr/bin/named-checkconf > /tmp/closure.list \
+ && lddtree -l /usr/sbin/named /usr/bin/named-checkconf \
+      > /tmp/closure.list 2> /tmp/closure.err \
+ && if grep -q 'Not found' /tmp/closure.list /tmp/closure.err; then \
+      echo "closure incomplete -- a dependency is missing from this stage:" >&2; \
+      grep 'Not found' /tmp/closure.list /tmp/closure.err >&2; \
+      exit 1; \
+    fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
  && tar -cf /tmp/closure.tar -T /tmp/closure.list \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
 
 # OpenSSL providers are opened with dlopen, so no dependency closure lists
 # them. Kept deliberately: DNSSEC only needs the built-in default provider

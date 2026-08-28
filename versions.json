@@ -1,4 +1,6 @@
 {
   "bind": "9.20.27",
+  "jemalloc": "5.3.1",
+  "jemalloc_sha256": "3826bc80232f22ed5c4662f3034f799ca316e819103bdc7bb99018a421706f92",
   "alpine": "3.24"
 }
