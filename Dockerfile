@@ -207,6 +207,32 @@ RUN /usr/local/bin/init --setup-dirs
 # hadolint ignore=DL3059
 RUN rm -rf /var/cache/apk/* /usr/lib/pkgconfig /usr/lib/cmake
 
+# Collect exactly the shared objects that ship, instead of copying /lib and
+# /usr/lib whole into the final stage. The wholesale copy carried whatever apk
+# had installed -- including /lib/apk/db/installed and libapk.so, a package
+# inventory and the package manager's own library, in an image that advertises
+# having neither.
+#
+# lddtree -l prints the binary, its transitive dependencies, symlinks together
+# with their targets, and the real loader for the architecture being built, so
+# nothing here hardcodes ld-musl-x86_64.so.1 and arm64 keeps working.
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add --no-cache lddtree \
+ && mkdir -p /rootfs \
+ && lddtree -l /usr/sbin/named /usr/bin/named-checkconf > /tmp/closure.list \
+ && sort -u /tmp/closure.list -o /tmp/closure.list \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && tar -xf /tmp/closure.tar -C /rootfs \
+ && rm -f /tmp/closure.list /tmp/closure.tar
+
+# OpenSSL providers are opened with dlopen, so no dependency closure lists
+# them. Kept deliberately: DNSSEC only needs the built-in default provider
+# today, but a missing provider fails at first validation, not at startup.
+# The 1.x engines (engines-3/) and the BIND query plugins (/usr/lib/bind/,
+# no `plugin` clause in our named.conf) are left out on purpose.
+RUN mkdir -p /rootfs/usr/lib \
+ && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
+
 # ============================================================================
 # Stage 4: FROM scratch -- final hardened image
 # ============================================================================
@@ -231,12 +257,9 @@ COPY --link --from=prep /etc/passwd /etc/group /etc/
 COPY --link --from=prep /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
-# 3. Dynamic linker (musl) -- copy whole dir: filename is arch-specific
-# (ld-musl-x86_64.so.1 vs ld-musl-aarch64.so.1), needed for multi-platform builds
-COPY --link --from=prep /lib/ /lib/
-
-# 4. Runtime shared libraries (system deps + BIND internal libs)
-COPY --link --from=prep /usr/lib/ /usr/lib/
+# 3. Runtime closure: loader, shared libraries and their symlinks, resolved
+#    at build time by lddtree in the prep stage -- not /lib and /usr/lib whole
+COPY --link --from=prep /rootfs/ /
 
 # 5. BIND binaries (named + named-checkconf only)
 COPY --link --from=prep /usr/sbin/named /usr/sbin/
