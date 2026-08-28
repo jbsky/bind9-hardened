@@ -15,6 +15,18 @@ ARG GO_VERSION=1.26
 # devant sa compilation dans le stage builder.
 ARG JEMALLOC_VERSION=5.3.1
 ARG JEMALLOC_SHA256=3826bc80232f22ed5c4662f3034f799ca316e819103bdc7bb99018a421706f92
+# Bibliotheques runtime compilees depuis les sources. Chacune est verifiee par
+# la signature detachee de son amont, contre une empreinte epinglee ici : les
+# cles sont committees dans keys/, et importer une cle puis verifier avec cette
+# meme cle ne prouverait rien -- l'empreinte est le seul ancrage.
+ARG ZLIB_VERSION=1.3.2
+ARG ZLIB_FPR=5ED46A6721D365587791E2AA783FCD8E58BCAFBA
+ARG XZ_VERSION=5.8.3
+ARG XZ_FPR=3690C240CE51B4670D30AD1C38EE757D69184620
+ARG URCU_VERSION=0.15.6
+ARG URCU_FPR=2A0B4ED915F2D3FA45F5B16217280A9781186ACF
+ARG LIBCAP_VERSION=2.78
+ARG LIBCAP_FPR=38A644698C69787344E954CE29EE848AE2CCF3F4
 
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
@@ -99,6 +111,136 @@ RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
  && test ! -e /usr/lib/libjemalloc.a \
  && strip --strip-unneeded /usr/lib/libjemalloc.so.2 \
  && rm -rf /tmp/jemalloc /tmp/jemalloc.tar.bz2 /tmp/jemalloc.sha256
+
+# --- Bibliotheques runtime, compilees depuis les sources ---
+#
+# `cd` a l'interieur du RUN plutot que WORKDIR : un WORKDIR resterait le
+# repertoire courant des etapes suivantes, ce qui a deja fait extraire un
+# tarball au mauvais endroit ailleurs dans le parc.
+#
+# Les flags PIE du stage sont neutralises pour ces compilations : ce sont des
+# bibliotheques PARTAGEES, et `-pie` sur un lien `-shared` fait tirer Scrt1.o
+# au linker, qui reclame alors un `main` inexistant. -fPIC est correct partout.
+#
+# `strip` explicite a chaque fois : une bibliotheque compilee depuis les
+# sources n'herite d'aucun strip, contrairement a un paquet Alpine.
+COPY keys/zlib-madler.gpg.asc keys/xz-tukaani.gpg.asc \
+     keys/urcu-efficios.gpg.asc keys/libcap-kernel.gpg.asc /tmp/keys/
+
+ARG ZLIB_VERSION
+ARG ZLIB_FPR
+ARG XZ_VERSION
+ARG XZ_FPR
+ARG URCU_VERSION
+ARG URCU_FPR
+ARG LIBCAP_VERSION
+ARG LIBCAP_FPR
+
+# strip_inplace : `strip` s'appuie sur libbfd, qui lie libz.so.1 -- stripper
+# une bibliotheque EN PLACE alors que strip l'a mappee reecrit le fichier sous
+# ses propres pieds et le fait tomber en Segmentation fault. Constate sur zlib.
+# Ecrire ailleurs puis renommer evite la classe entiere : rename(2) ne touche
+# pas l'inode que les processus en cours ont deja ouvert.
+COPY strip-inplace.sh /usr/local/bin/strip_inplace
+
+ENV SRCLIB_CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
+    SRCLIB_LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack"
+
+# zlib
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+ && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" -o /tmp/zlib.tar.gz \
+ && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz.asc" -o /tmp/zlib.tar.gz.asc \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/zlib-madler.gpg.asc \
+ && gpg --batch --list-keys "${ZLIB_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/zlib.tar.gz.asc /tmp/zlib.tar.gz \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/zlib.tar.gz.asc \
+ && mkdir -p /tmp/zlib && tar -xzf /tmp/zlib.tar.gz -C /tmp/zlib --strip-components=1 \
+ && cd /tmp/zlib && ./configure --prefix=/usr --libdir=/usr/lib \
+ && make -j"$(nproc)" && make install \
+ && rm -f /usr/lib/libz.a \
+ && strip_inplace /usr/lib/libz.so.1.* \
+ && rm -rf /tmp/zlib /tmp/zlib.tar.gz
+
+# xz (liblzma) -- signature GPG obligatoire ici : apres la porte derobee de
+# 2024, un sha256 calcule soi-meme sur un tarball qu'on vient de telecharger
+# serait la verification la plus faible sur le projet ou elle compte le plus.
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+ && XZ_URL="https://github.com/tukaani-project/xz/releases/download/v${XZ_VERSION}" \
+ && curl -fsSL "${XZ_URL}/xz-${XZ_VERSION}.tar.gz" -o /tmp/xz.tar.gz \
+ && curl -fsSL "${XZ_URL}/xz-${XZ_VERSION}.tar.gz.sig" -o /tmp/xz.tar.gz.sig \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/xz-tukaani.gpg.asc \
+ && gpg --batch --list-keys "${XZ_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/xz.tar.gz.sig /tmp/xz.tar.gz \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/xz.tar.gz.sig \
+ && mkdir -p /tmp/xz && tar -xzf /tmp/xz.tar.gz -C /tmp/xz --strip-components=1 \
+ && cd /tmp/xz \
+ && ./configure --prefix=/usr --libdir=/usr/lib --disable-static \
+      --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo \
+      --disable-scripts --disable-doc --disable-nls \
+ && make -j"$(nproc)" && make install \
+ && strip_inplace /usr/lib/liblzma.so.5.* \
+ && rm -rf /tmp/xz /tmp/xz.tar.gz
+
+# userspace-rcu
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+ && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2" -o /tmp/urcu.tar.bz2 \
+ && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2.asc" -o /tmp/urcu.tar.bz2.asc \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/urcu-efficios.gpg.asc \
+ && gpg --batch --list-keys "${URCU_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/urcu.tar.bz2.asc /tmp/urcu.tar.bz2 \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/urcu.tar.bz2.asc \
+ && mkdir -p /tmp/urcu && tar -xjf /tmp/urcu.tar.bz2 -C /tmp/urcu --strip-components=1 \
+ && cd /tmp/urcu \
+ && ./configure --prefix=/usr --libdir=/usr/lib --disable-static --disable-examples \
+ && make -j"$(nproc)" && make install \
+ && strip_inplace /usr/lib/liburcu*.so.*.* \
+ && rm -rf /tmp/urcu /tmp/urcu.tar.bz2
+
+# libcap -- kernel.org signe le tar NON compresse, d'ou la decompression avant
+# verification. Makefile pur, pas d'autotools : les chemins passent en variables.
+#
+# Cible `install-shared-cap` et non `install` : la cible par defaut est
+# `install-static`, et un `make` complet construit aussi progs/ (capsh, setcap)
+# dont le generateur mkcapshdoc.sh porte un shebang #!/bin/bash absent de
+# l'image. On ne veut ni les programmes ni l'archive statique, juste la
+# bibliotheque partagee. PTHREADS=no evite libpsx, que rien ne reclame ici.
+#
+# Pas de `-j` : le Makefile de libcap ne declare pas la dependance vers
+# cap_names.h, qu'il genere lui-meme, et un build parallele compile cap_magic.o
+# avant que l'en-tete existe. La bibliotheque est minuscule, le serie ne coute
+# rien.
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && LIBCAP_URL="https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2" \
+ && curl -fsSL "${LIBCAP_URL}/libcap-${LIBCAP_VERSION}.tar.xz" -o /tmp/libcap.tar.xz \
+ && curl -fsSL "${LIBCAP_URL}/libcap-${LIBCAP_VERSION}.tar.sign" -o /tmp/libcap.tar.sign \
+ && xz -dc /tmp/libcap.tar.xz > /tmp/libcap.tar \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/libcap-kernel.gpg.asc \
+ && gpg --batch --list-keys "${LIBCAP_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/libcap.tar.sign /tmp/libcap.tar \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/libcap.tar.sign /tmp/libcap.tar.xz \
+ && mkdir -p /tmp/libcap && tar -xf /tmp/libcap.tar -C /tmp/libcap --strip-components=1 \
+ && cd /tmp/libcap \
+ && make -C libcap \
+      CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+      SHARED=yes PTHREADS=no GOLANG=no \
+      prefix=/usr lib=lib install-shared-cap \
+ && strip_inplace /usr/lib/libcap.so.2.* \
+ && rm -rf /tmp/libcap /tmp/libcap.tar /tmp/keys
 
 # Download BIND source + PGP detached signature (ISC official tarball)
 ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz /tmp/bind.tar.xz
@@ -217,10 +359,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
         libcrypto3 \
         libssl3 \
         libxml2 \
-        json-c \
-        zlib \
-        libcap2 \
-        userspace-rcu
+        json-c
 
 # Create non-root user (UID 5300, mnemonic for port 53)
 RUN addgroup -g 5300 -S named && \
@@ -228,9 +367,19 @@ RUN addgroup -g 5300 -S named && \
 
 # Copy BIND binaries and internal shared libraries from builder
 COPY --from=builder /out/ /
-# jemalloc est compile dans le builder (voir la note la-bas), pas installe par
-# apk ici : sa bibliotheque partagee doit donc etre reprise explicitement.
+# Bibliotheques compilees dans le builder (voir les notes la-bas), pas
+# installees par apk ici : elles doivent etre reprises explicitement.
+#
+# Cette copie vient APRES l'`apk add` a dessein : les paquets encore non portes
+# tirent certaines de ces bibliotheques en dependance transitive (libxml2 amene
+# zlib et xz-libs), et la copie ecrase alors les exemplaires d'Alpine. Meme
+# SONAME, meme version amont -- c'est bien la version compilee ici qui part
+# dans la cloture.
 COPY --from=builder /usr/lib/libjemalloc.so* /usr/lib/
+COPY --from=builder /usr/lib/libz.so* /usr/lib/
+COPY --from=builder /usr/lib/liblzma.so* /usr/lib/
+COPY --from=builder /usr/lib/liburcu*.so* /usr/lib/
+COPY --from=builder /usr/lib/libcap.so* /usr/lib/
 
 # Set file capability for binding port 53 as non-root
 RUN setcap 'cap_net_bind_service+ep' /usr/sbin/named
