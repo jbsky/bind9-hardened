@@ -27,6 +27,15 @@ ARG URCU_VERSION=0.15.6
 ARG URCU_FPR=2A0B4ED915F2D3FA45F5B16217280A9781186ACF
 ARG LIBCAP_VERSION=2.78
 ARG LIBCAP_FPR=38A644698C69787344E954CE29EE848AE2CCF3F4
+ARG LIBUV_VERSION=1.52.1
+ARG LIBUV_FPR=612F0EAD9401622379DF4402F28C3C8DA33C03BE
+# json-c ne signe pas ses releases. Le sha256 est epingle, mais il n'a pas ete
+# calcule a l'aveugle : le tarball GitHub est identique, octet pour octet, a
+# celui qu'Alpine verifie de son cote -- et Alpine le recupere depuis un canal
+# different (S3), donc deux chemins independants concordent.
+ARG JSONC_VERSION=0.19
+ARG JSONC_TAG=json-c-0.19-20260627
+ARG JSONC_SHA256=37ad0249902e301bd9052bf712e511fcc6acff4ecaad4b5900aad9ce564e26de
 
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
@@ -62,16 +71,12 @@ RUN --mount=type=cache,target=/var/cache/apk \
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         openssl-dev \
-        libuv-dev \
-        userspace-rcu-dev
+        cmake
 
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         libxml2-dev \
-        json-c-dev \
-        zlib-dev \
-        libcap-dev \
         curl
 
 # --- jemalloc, compile depuis les sources ---
@@ -125,7 +130,8 @@ RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
 # `strip` explicite a chaque fois : une bibliotheque compilee depuis les
 # sources n'herite d'aucun strip, contrairement a un paquet Alpine.
 COPY keys/zlib-madler.gpg.asc keys/xz-tukaani.gpg.asc \
-     keys/urcu-efficios.gpg.asc keys/libcap-kernel.gpg.asc /tmp/keys/
+     keys/urcu-efficios.gpg.asc keys/libcap-kernel.gpg.asc \
+     keys/libuv-sgimeno.gpg.asc /tmp/keys/
 
 ARG ZLIB_VERSION
 ARG ZLIB_FPR
@@ -135,6 +141,11 @@ ARG URCU_VERSION
 ARG URCU_FPR
 ARG LIBCAP_VERSION
 ARG LIBCAP_FPR
+ARG LIBUV_VERSION
+ARG LIBUV_FPR
+ARG JSONC_VERSION
+ARG JSONC_TAG
+ARG JSONC_SHA256
 
 # strip_inplace : `strip` s'appuie sur libbfd, qui lie libz.so.1 -- stripper
 # une bibliotheque EN PLACE alors que strip l'a mappee reecrit le fichier sous
@@ -240,7 +251,62 @@ RUN --mount=type=secret,id=ca-certs,required=false \
       SHARED=yes PTHREADS=no GOLANG=no \
       prefix=/usr lib=lib install-shared-cap \
  && strip_inplace /usr/lib/libcap.so.2.* \
- && rm -rf /tmp/libcap /tmp/libcap.tar /tmp/keys
+ && rm -rf /tmp/libcap /tmp/libcap.tar
+
+# libuv -- cmake. BUILD_TESTING=OFF evite de compiler la suite de tests, qui
+# n'apporte rien ici et allonge le build.
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VERSION}.tar.gz" -o /tmp/libuv.tar.gz \
+ && curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VERSION}.tar.gz.sign" -o /tmp/libuv.tar.gz.sign \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/libuv-sgimeno.gpg.asc \
+ && gpg --batch --list-keys "${LIBUV_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/libuv.tar.gz.sign /tmp/libuv.tar.gz \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/libuv.tar.gz.sign \
+ && mkdir -p /tmp/libuv && tar -xzf /tmp/libuv.tar.gz -C /tmp/libuv --strip-components=1 \
+ && cd /tmp/libuv \
+ && cmake -S . -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_INSTALL_LIBDIR=lib \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_C_FLAGS="$SRCLIB_CFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$SRCLIB_LDFLAGS" \
+      -DBUILD_SHARED_LIBS=ON \
+      -DLIBUV_BUILD_SHARED=ON \
+      -DBUILD_TESTING=OFF \
+ && cmake --build build --parallel "$(nproc)" \
+ && cmake --install build \
+ && strip_inplace /usr/lib/libuv.so.1.* \
+ && rm -rf /tmp/libuv /tmp/libuv.tar.gz
+
+# json-c -- cmake. BIND ne s'en sert que pour la sortie de statistiques.
+# hadolint ignore=DL3003
+RUN --mount=type=secret,id=ca-certs,required=false \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/json-c-${JSONC_VERSION}.tar.gz" \
+      -o /tmp/jsonc.tar.gz \
+ && printf '%s  /tmp/jsonc.tar.gz\n' "${JSONC_SHA256}" > /tmp/jsonc.sha256 \
+ && sha256sum -c /tmp/jsonc.sha256 \
+ && mkdir -p /tmp/jsonc && tar -xzf /tmp/jsonc.tar.gz -C /tmp/jsonc --strip-components=1 \
+ && cd /tmp/jsonc \
+ && cmake -S . -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_INSTALL_LIBDIR=lib \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_C_FLAGS="$SRCLIB_CFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$SRCLIB_LDFLAGS" \
+      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_STATIC_LIBS=OFF \
+      -DBUILD_TESTING=OFF \
+      -DDISABLE_WERROR=ON \
+ && cmake --build build --parallel "$(nproc)" \
+ && cmake --install build \
+ && strip_inplace /usr/lib/libjson-c.so.5.* \
+ && rm -rf /tmp/jsonc /tmp/jsonc.tar.gz /tmp/jsonc.sha256 /tmp/keys
 
 # Download BIND source + PGP detached signature (ISC official tarball)
 ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz /tmp/bind.tar.xz
@@ -355,11 +421,9 @@ RUN --mount=type=cache,target=/var/cache/apk \
         tzdata \
         ca-certificates \
         libcap-utils \
-        libuv \
         libcrypto3 \
         libssl3 \
-        libxml2 \
-        json-c
+        libxml2
 
 # Create non-root user (UID 5300, mnemonic for port 53)
 RUN addgroup -g 5300 -S named && \
@@ -380,6 +444,8 @@ COPY --from=builder /usr/lib/libz.so* /usr/lib/
 COPY --from=builder /usr/lib/liblzma.so* /usr/lib/
 COPY --from=builder /usr/lib/liburcu*.so* /usr/lib/
 COPY --from=builder /usr/lib/libcap.so* /usr/lib/
+COPY --from=builder /usr/lib/libuv.so* /usr/lib/
+COPY --from=builder /usr/lib/libjson-c.so* /usr/lib/
 
 # Set file capability for binding port 53 as non-root
 RUN setcap 'cap_net_bind_service+ep' /usr/sbin/named
