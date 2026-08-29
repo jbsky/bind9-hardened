@@ -21,8 +21,6 @@ ARG JEMALLOC_SHA256=3826bc80232f22ed5c4662f3034f799ca316e819103bdc7bb99018a42170
 # meme cle ne prouverait rien -- l'empreinte est le seul ancrage.
 ARG ZLIB_VERSION=1.3.2
 ARG ZLIB_FPR=5ED46A6721D365587791E2AA783FCD8E58BCAFBA
-ARG XZ_VERSION=5.8.3
-ARG XZ_FPR=3690C240CE51B4670D30AD1C38EE757D69184620
 ARG URCU_VERSION=0.15.6
 ARG URCU_FPR=2A0B4ED915F2D3FA45F5B16217280A9781186ACF
 ARG LIBCAP_VERSION=2.78
@@ -49,7 +47,14 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-# Proxy-aware CA injection (BuildKit secret, never baked into image)
+# Injection de la CA du proxy (secret BuildKit, jamais gravee dans l'image).
+#
+# Une seule fois suffit, et c'est deliberé : l'ajout persiste dans la couche,
+# donc tous les RUN suivants le voient. Seul `apk add ca-certificates` le
+# detruirait -- son post-install regenere le bundle depuis zero -- et ce paquet
+# n'est jamais installe dans ce stage (verifie : build-base, gnupg, openssl-dev,
+# cmake et curl le laissent intact). Si un jour il l'etait, il faudrait
+# reinjecter APRES, pas repeter l'injection partout.
 RUN --mount=type=secret,id=ca-certs,required=false \
     if [ -f /run/secrets/ca-certs ]; then \
         cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; \
@@ -71,12 +76,12 @@ RUN --mount=type=cache,target=/var/cache/apk \
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
         openssl-dev \
-        cmake
+        cmake \
+        xz
 
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
-        libxml2-dev \
         curl
 
 # --- jemalloc, compile depuis les sources ---
@@ -129,14 +134,11 @@ RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
 #
 # `strip` explicite a chaque fois : une bibliotheque compilee depuis les
 # sources n'herite d'aucun strip, contrairement a un paquet Alpine.
-COPY keys/zlib-madler.gpg.asc keys/xz-tukaani.gpg.asc \
-     keys/urcu-efficios.gpg.asc keys/libcap-kernel.gpg.asc \
-     keys/libuv-sgimeno.gpg.asc /tmp/keys/
+COPY keys/zlib-madler.gpg.asc keys/urcu-efficios.gpg.asc \
+     keys/libcap-kernel.gpg.asc keys/libuv-sgimeno.gpg.asc /tmp/keys/
 
 ARG ZLIB_VERSION
 ARG ZLIB_FPR
-ARG XZ_VERSION
-ARG XZ_FPR
 ARG URCU_VERSION
 ARG URCU_FPR
 ARG LIBCAP_VERSION
@@ -159,9 +161,7 @@ ENV SRCLIB_CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
 
 # zlib
 # hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
  && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" -o /tmp/zlib.tar.gz \
  && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz.asc" -o /tmp/zlib.tar.gz.asc \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -176,35 +176,9 @@ RUN --mount=type=secret,id=ca-certs,required=false \
  && strip_inplace /usr/lib/libz.so.1.* \
  && rm -rf /tmp/zlib /tmp/zlib.tar.gz
 
-# xz (liblzma) -- signature GPG obligatoire ici : apres la porte derobee de
-# 2024, un sha256 calcule soi-meme sur un tarball qu'on vient de telecharger
-# serait la verification la plus faible sur le projet ou elle compte le plus.
-# hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
- && XZ_URL="https://github.com/tukaani-project/xz/releases/download/v${XZ_VERSION}" \
- && curl -fsSL "${XZ_URL}/xz-${XZ_VERSION}.tar.gz" -o /tmp/xz.tar.gz \
- && curl -fsSL "${XZ_URL}/xz-${XZ_VERSION}.tar.gz.sig" -o /tmp/xz.tar.gz.sig \
- && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
- && gpg --batch --import /tmp/keys/xz-tukaani.gpg.asc \
- && gpg --batch --list-keys "${XZ_FPR}" > /dev/null \
- && gpg --batch --verify /tmp/xz.tar.gz.sig /tmp/xz.tar.gz \
- && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/xz.tar.gz.sig \
- && mkdir -p /tmp/xz && tar -xzf /tmp/xz.tar.gz -C /tmp/xz --strip-components=1 \
- && cd /tmp/xz \
- && ./configure --prefix=/usr --libdir=/usr/lib --disable-static \
-      --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo \
-      --disable-scripts --disable-doc --disable-nls \
- && make -j"$(nproc)" && make install \
- && strip_inplace /usr/lib/liblzma.so.5.* \
- && rm -rf /tmp/xz /tmp/xz.tar.gz
-
 # userspace-rcu
 # hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
  && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2" -o /tmp/urcu.tar.bz2 \
  && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2.asc" -o /tmp/urcu.tar.bz2.asc \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -233,9 +207,7 @@ RUN --mount=type=secret,id=ca-certs,required=false \
 # avant que l'en-tete existe. La bibliotheque est minuscule, le serie ne coute
 # rien.
 # hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && LIBCAP_URL="https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2" \
+RUN LIBCAP_URL="https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2" \
  && curl -fsSL "${LIBCAP_URL}/libcap-${LIBCAP_VERSION}.tar.xz" -o /tmp/libcap.tar.xz \
  && curl -fsSL "${LIBCAP_URL}/libcap-${LIBCAP_VERSION}.tar.sign" -o /tmp/libcap.tar.sign \
  && xz -dc /tmp/libcap.tar.xz > /tmp/libcap.tar \
@@ -256,9 +228,7 @@ RUN --mount=type=secret,id=ca-certs,required=false \
 # libuv -- cmake. BUILD_TESTING=OFF evite de compiler la suite de tests, qui
 # n'apporte rien ici et allonge le build.
 # hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VERSION}.tar.gz" -o /tmp/libuv.tar.gz \
+RUN curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VERSION}.tar.gz" -o /tmp/libuv.tar.gz \
  && curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VERSION}.tar.gz.sign" -o /tmp/libuv.tar.gz.sign \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
  && gpg --batch --import /tmp/keys/libuv-sgimeno.gpg.asc \
@@ -284,9 +254,7 @@ RUN --mount=type=secret,id=ca-certs,required=false \
 
 # json-c -- cmake. BIND ne s'en sert que pour la sortie de statistiques.
 # hadolint ignore=DL3003
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
- && curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/json-c-${JSONC_VERSION}.tar.gz" \
+RUN curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/json-c-${JSONC_VERSION}.tar.gz" \
       -o /tmp/jsonc.tar.gz \
  && printf '%s  /tmp/jsonc.tar.gz\n' "${JSONC_SHA256}" > /tmp/jsonc.sha256 \
  && sha256sum -c /tmp/jsonc.sha256 \
@@ -332,7 +300,7 @@ RUN if [ -f configure ]; then \
             --sysconfdir=/etc/bind \
             --localstatedir=/var \
             --with-openssl \
-            --with-libxml2 \
+            --without-libxml2 \
             --with-json-c \
             --with-zlib \
             --with-jemalloc \
@@ -407,11 +375,11 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 
 ARG BIND_VERSION
 
-# Proxy-aware
-RUN --mount=type=secret,id=ca-certs,required=false \
-    if [ -f /run/secrets/ca-certs ]; then \
-        cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; \
-    fi
+# Pas d'injection de CA ici, a la difference du builder : ce stage ne fait
+# aucun telechargement HTTPS (apk passe en http ci-dessous, tout le reste est
+# du COPY). Et son /etc/ssl part dans l'image finale : y ajouter la CA privee
+# du proxy la publierait. L'`apk add ca-certificates` plus bas regenerait le
+# bundle et l'effacerait, mais compter sur cet ordre serait fragile.
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories
 
 # Runtime libraries + tools
@@ -422,8 +390,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
         ca-certificates \
         libcap-utils \
         libcrypto3 \
-        libssl3 \
-        libxml2
+        libssl3
 
 # Create non-root user (UID 5300, mnemonic for port 53)
 RUN addgroup -g 5300 -S named && \
@@ -434,14 +401,11 @@ COPY --from=builder /out/ /
 # Bibliotheques compilees dans le builder (voir les notes la-bas), pas
 # installees par apk ici : elles doivent etre reprises explicitement.
 #
-# Cette copie vient APRES l'`apk add` a dessein : les paquets encore non portes
-# tirent certaines de ces bibliotheques en dependance transitive (libxml2 amene
-# zlib et xz-libs), et la copie ecrase alors les exemplaires d'Alpine. Meme
-# SONAME, meme version amont -- c'est bien la version compilee ici qui part
-# dans la cloture.
+# Cette copie vient APRES l'`apk add` a dessein : tant qu'un paquet non porte
+# reste, il peut tirer une de ces bibliotheques en dependance transitive, et la
+# copie ecrase alors l'exemplaire d'Alpine. Il ne reste plus qu'OpenSSL.
 COPY --from=builder /usr/lib/libjemalloc.so* /usr/lib/
 COPY --from=builder /usr/lib/libz.so* /usr/lib/
-COPY --from=builder /usr/lib/liblzma.so* /usr/lib/
 COPY --from=builder /usr/lib/liburcu*.so* /usr/lib/
 COPY --from=builder /usr/lib/libcap.so* /usr/lib/
 COPY --from=builder /usr/lib/libuv.so* /usr/lib/

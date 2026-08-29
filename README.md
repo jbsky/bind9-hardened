@@ -97,7 +97,7 @@ Stage 4: FROM scratch → Assemblage final (named + named-checkconf + init + tin
 
 ```
 --prefix=/usr --sysconfdir=/etc/bind --localstatedir=/var
---with-openssl --with-libxml2 --with-json-c --with-zlib --with-jemalloc
+--with-openssl --without-libxml2 --with-json-c --with-zlib --with-jemalloc
 --disable-doh --disable-static
 --without-gssapi --without-libidn2 --without-readline --without-cmocka
 ```
