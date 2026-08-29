@@ -34,6 +34,8 @@ ARG LIBUV_FPR=612F0EAD9401622379DF4402F28C3C8DA33C03BE
 ARG JSONC_VERSION=0.19
 ARG JSONC_TAG=json-c-0.19-20260627
 ARG JSONC_SHA256=37ad0249902e301bd9052bf712e511fcc6acff4ecaad4b5900aad9ce564e26de
+ARG OPENSSL_VERSION=3.5.8
+ARG OPENSSL_FPR=B146647E45A7B33947AB226B2A2C87D161692D40
 
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
@@ -75,9 +77,9 @@ RUN --mount=type=cache,target=/var/cache/apk \
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
-        openssl-dev \
         cmake \
-        xz
+        xz \
+        patch
 
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -135,7 +137,9 @@ RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
 # `strip` explicite a chaque fois : une bibliotheque compilee depuis les
 # sources n'herite d'aucun strip, contrairement a un paquet Alpine.
 COPY keys/zlib-madler.gpg.asc keys/urcu-efficios.gpg.asc \
-     keys/libcap-kernel.gpg.asc keys/libuv-sgimeno.gpg.asc /tmp/keys/
+     keys/libcap-kernel.gpg.asc keys/libuv-sgimeno.gpg.asc \
+     keys/openssl.gpg.asc /tmp/keys/
+COPY patches/openssl-auxv.patch /tmp/patches/openssl-auxv.patch
 
 ARG ZLIB_VERSION
 ARG ZLIB_FPR
@@ -148,6 +152,8 @@ ARG LIBUV_FPR
 ARG JSONC_VERSION
 ARG JSONC_TAG
 ARG JSONC_SHA256
+ARG OPENSSL_VERSION
+ARG OPENSSL_FPR
 
 # strip_inplace : `strip` s'appuie sur libbfd, qui lie libz.so.1 -- stripper
 # une bibliotheque EN PLACE alors que strip l'a mappee reecrit le fichier sous
@@ -274,7 +280,79 @@ RUN curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/
  && cmake --build build --parallel "$(nproc)" \
  && cmake --install build \
  && strip_inplace /usr/lib/libjson-c.so.5.* \
- && rm -rf /tmp/jsonc /tmp/jsonc.tar.gz /tmp/jsonc.sha256 /tmp/keys
+ && rm -rf /tmp/jsonc /tmp/jsonc.tar.gz /tmp/jsonc.sha256
+
+# OpenSSL -- la plus grosse des bibliotheques embarquees (5,7 Mo a elle seule).
+#
+# Un patch amont est applique, `openssl-auxv.patch`, repris tel quel d'Alpine.
+# Ce n'est PAS un correctif de securite mais de portabilite musl : sans lui,
+# sur arm64 et ppc, libcrypto detecte les capacites CPU en piegeant SIGILL au
+# lieu de lire auxv. Sur x86_64 il ne change rien. Il est applique quand meme
+# pour ne pas regresser par rapport au paquet qu'on remplace -- meme principe
+# que le refus de livrer un libxml2 amont moins sur que celui d'Alpine, en
+# moins grave. Amont ne le prendra probablement jamais : il est specifique aux
+# libc non-glibc.
+#
+# `install_sw` et non `install` : installe les bibliotheques, les en-tetes, les
+# providers et le binaire, sans les pages de manuel.
+#
+# Les flags sont exportes dans l'ENVIRONNEMENT, pas passes en arguments a
+# Configure : le systeme de build d'OpenSSL lit LDFLAGS depuis l'environnement,
+# et le `-pie` du stage y survivait meme en passant les bons flags en argument.
+# Resultat : `undefined reference to main` sur le lien de libcrypto.so.3, le
+# meme symptome que partout ailleurs. Neutraliser l'environnement est ce qui
+# compte, pas seulement fournir les bons arguments.
+#
+# La liste de `no-*` est reprise d'Alpine, pour la SURFACE D'ATTAQUE : l'amont
+# active par defaut des algorithmes que personne ne veut plus (IDEA, MDC2, RC5,
+# SEED, courbes binaires, SSLv3, suites faibles). Ce n'est pas une optimisation
+# de taille -- mesure faite, la bibliotheque a meme legerement grossi apres,
+# ec_nistp_64_gcc_128 et ktls ajoutant plus que les no-* n'enlevent.
+#
+# L'ecart de taille avec le paquet Alpine vient du NIVEAU D'OPTIMISATION, pas
+# des options d'algorithmes. Mesure sur libcrypto.so.3 :
+#   Alpine (-Os)  5 105 Ko  |  ici en -Os  5 393 Ko  |  ici en -O2  6 338 Ko
+# `-O2` est garde volontairement : c'est le meme niveau que le reste de l'image,
+# et la crypto est precisement l'endroit ou la performance vaut ces 800 Ko sur
+# une image de 17 Mo. Passer a `-Os` est un changement d'une ligne si l'arbitrage
+# change.
+#
+# `enable-fips` d'Alpine n'est PAS repris : le provider FIPS ajoute du poids
+# pour une contrainte de conformite qu'on n'a pas.
+# ec_nistp_64_gcc_128 est une optimisation x86_64 uniquement.
+# hadolint ignore=DL3003
+RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
+ && curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+      -o /tmp/openssl.tar.gz \
+ && curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz.asc" \
+      -o /tmp/openssl.tar.gz.asc \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && gpg --batch --import /tmp/keys/openssl.gpg.asc \
+ && gpg --batch --list-keys "${OPENSSL_FPR}" > /dev/null \
+ && gpg --batch --verify /tmp/openssl.tar.gz.asc /tmp/openssl.tar.gz \
+ && gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" /tmp/openssl.tar.gz.asc \
+ && mkdir -p /tmp/openssl && tar -xzf /tmp/openssl.tar.gz -C /tmp/openssl --strip-components=1 \
+ && cd /tmp/openssl \
+ && patch -p1 < /tmp/patches/openssl-auxv.patch \
+ && case "$(uname -m)" in \
+      x86_64) OSSL_ARCH_OPT=enable-ec_nistp_64_gcc_128 ;; \
+      *)      OSSL_ARCH_OPT=no-deprecated-3.0 ;; \
+    esac \
+ && ./Configure \
+      --prefix=/usr \
+      --libdir=lib \
+      --openssldir=/etc/ssl \
+      shared enable-ktls \
+      no-tests no-docs \
+      no-zlib no-async no-comp \
+      no-idea no-mdc2 no-rc5 no-seed no-ec2m \
+      no-ssl3 no-weak-ssl-ciphers \
+      "$OSSL_ARCH_OPT" \
+ && make -j"$(nproc)" \
+ && make install_sw \
+ && strip_inplace /usr/lib/libcrypto.so.3 /usr/lib/libssl.so.3 \
+ && strip_inplace /usr/lib/ossl-modules/legacy.so \
+ && rm -rf /tmp/openssl /tmp/openssl.tar.gz /tmp/keys /tmp/patches
 
 # Download BIND source + PGP detached signature (ISC official tarball)
 ADD https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz /tmp/bind.tar.xz
@@ -388,9 +466,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
         tini-static \
         tzdata \
         ca-certificates \
-        libcap-utils \
-        libcrypto3 \
-        libssl3
+        libcap-utils
 
 # Create non-root user (UID 5300, mnemonic for port 53)
 RUN addgroup -g 5300 -S named && \
@@ -410,6 +486,9 @@ COPY --from=builder /usr/lib/liburcu*.so* /usr/lib/
 COPY --from=builder /usr/lib/libcap.so* /usr/lib/
 COPY --from=builder /usr/lib/libuv.so* /usr/lib/
 COPY --from=builder /usr/lib/libjson-c.so* /usr/lib/
+COPY --from=builder /usr/lib/libcrypto.so* /usr/lib/
+COPY --from=builder /usr/lib/libssl.so* /usr/lib/
+COPY --from=builder /usr/lib/ossl-modules/ /usr/lib/ossl-modules/
 
 # Set file capability for binding port 53 as non-root
 RUN setcap 'cap_net_bind_service+ep' /usr/sbin/named
