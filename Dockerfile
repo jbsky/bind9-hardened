@@ -319,7 +319,12 @@ RUN curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/
 #
 # `enable-fips` d'Alpine n'est PAS repris : le provider FIPS ajoute du poids
 # pour une contrainte de conformite qu'on n'a pas.
-# ec_nistp_64_gcc_128 est une optimisation x86_64 uniquement.
+# ec_nistp_64_gcc_128 est une optimisation x86_64 uniquement : ailleurs la liste
+# d'options d'architecture est VIDE. `set --` / `"$@"` exprime ce vide sans
+# argument fantome. Une premiere version remplissait la branche non-x86_64 avec
+# `no-deprecated-3.0`, option inexistante inventee pour ne pas laisser la
+# variable vide -- alors qu'un argument vide est parfaitement accepte par
+# Configure (verifie). Seul l'arm64 en emulation l'a revele, 25 min plus tard.
 # hadolint ignore=DL3003
 RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
  && curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
@@ -335,8 +340,8 @@ RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
  && cd /tmp/openssl \
  && patch -p1 < /tmp/patches/openssl-auxv.patch \
  && case "$(uname -m)" in \
-      x86_64) OSSL_ARCH_OPT=enable-ec_nistp_64_gcc_128 ;; \
-      *)      OSSL_ARCH_OPT=no-deprecated-3.0 ;; \
+      x86_64) set -- enable-ec_nistp_64_gcc_128 ;; \
+      *)      set -- ;; \
     esac \
  && ./Configure \
       --prefix=/usr \
@@ -347,7 +352,7 @@ RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
       no-zlib no-async no-comp \
       no-idea no-mdc2 no-rc5 no-seed no-ec2m \
       no-ssl3 no-weak-ssl-ciphers \
-      "$OSSL_ARCH_OPT" \
+      "$@" \
  && make -j"$(nproc)" \
  && make install_sw \
  && strip_inplace /usr/lib/libcrypto.so.3 /usr/lib/libssl.so.3 \
