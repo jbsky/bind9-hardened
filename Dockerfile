@@ -484,7 +484,20 @@ COPY --from=builder /out/ /
 #
 # Cette copie vient APRES l'`apk add` a dessein : tant qu'un paquet non porte
 # reste, il peut tirer une de ces bibliotheques en dependance transitive, et la
-# copie ecrase alors l'exemplaire d'Alpine. Il ne reste plus qu'OpenSSL.
+# copie ecrase alors l'exemplaire d'Alpine.
+#
+# Il ne reste plus qu'une bibliotheque embarquee issue d'un paquet : musl, et
+# elle y reste VOLONTAIREMENT. Alpine livre musl-1.2.6-r2 avec CVE-2026-40200
+# (corruption de tas dans qsort) et CVE-2026-6042 (iconv) retroportes ; l'amont
+# en est reste a 1.2.6, qui ne contient ni l'un ni l'autre. La compiler depuis
+# les sources livrerait une corruption de tas connue dans une fonction qu'un
+# demon DNS appelle, pour gagner une ligne de principe.
+#
+# Critere de reouverture, en commits et non en numero de version : porter quand
+# une release amont contient 228da39e, b3291b9a, 5122f9f3 (qsort) et 67219f01
+# (iconv). `audit-hardened-images.sh --online` surveille la derive du jeu de
+# patches d'Alpine et le signalera. Detail : skill docker-image-hardening,
+# references/from-source.md, section « La libc est le plancher ».
 COPY --from=builder /usr/lib/libjemalloc.so* /usr/lib/
 COPY --from=builder /usr/lib/libz.so* /usr/lib/
 COPY --from=builder /usr/lib/liburcu*.so* /usr/lib/
