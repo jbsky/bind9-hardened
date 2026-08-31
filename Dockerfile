@@ -542,6 +542,22 @@ RUN rm -rf /var/cache/apk/* /usr/lib/pkgconfig /usr/lib/cmake
 # jemalloc now comes from the builder rather than from apk, exactly this case --
 # would ship a closure with a hole in it, and the failure would only surface at
 # container start.
+#
+# lddtree prints each binary it is handed, so this list holds the roots as well
+# as their dependencies -- and every one of those roots is copied again, on its
+# own COPY line, in the final stage. Layers are not deduplicated, so named and named-checkconf was
+# going out twice: 0,52 Mo of this image. The roots keep their individual COPY
+# and are filtered out of the tar input here; what this archive carries is the
+# dependencies and the loader.
+#
+# Filtering rather than deleting those COPY lines is not a style choice.
+# `setcap` puts cap_net_bind_service on /usr/sbin/named, and busybox tar has no
+# xattr support: a copy travelling through this archive arrives without its
+# capability, and named then fails to bind port 53 -- at runtime, in
+# production, with nothing failing at build time.
+#
+# The completeness check runs on the UNFILTERED list, above: a filter must
+# never be able to hide a missing dependency.
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache lddtree \
  && mkdir -p /rootfs \
@@ -553,9 +569,10 @@ RUN --mount=type=cache,target=/var/cache/apk \
       exit 1; \
     fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
- && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && grep -v -E '^/usr/(sbin/named|bin/named-checkconf)$' /tmp/closure.list > /tmp/closure.deps \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.deps \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.deps /tmp/closure.err /tmp/closure.tar
 
 # OpenSSL providers are opened with dlopen, so no dependency closure lists
 # them. Kept deliberately: DNSSEC only needs the built-in default provider
