@@ -1,0 +1,33 @@
+# image-manifest v1
+# image : jbsky/bind9-hardened:latest
+# genere par scripts/image-manifest.py -- ne pas editer a la main
+
+f 0644 0:0 - etc/group
+f 0644 0:0 - etc/passwd
+f 0755 0:0 elf lib/ld-musl-x86_64.so.1
+l lib/libc.musl-x86_64.so.1 -> ld-musl-x86_64.so.1
+f 0755 0:0 elf sbin/tini
+f 0755 0:0 elf usr/bin/named-checkconf
+f 0755 0:0 elf usr/lib/libcap.so.2
+f 0755 0:0 elf usr/lib/libcrypto.so.3
+f 0755 0:0 elf usr/lib/libdns-9.20.27.so
+f 0755 0:0 elf usr/lib/libisc-9.20.27.so
+f 0755 0:0 elf usr/lib/libisccc-9.20.27.so
+f 0755 0:0 elf usr/lib/libisccfg-9.20.27.so
+f 0755 0:0 elf usr/lib/libjemalloc.so.2
+f 0755 0:0 elf usr/lib/libjson-c.so.5
+f 0755 0:0 elf usr/lib/libns-9.20.27.so
+f 0755 0:0 elf usr/lib/libssl.so.3
+f 0755 0:0 elf usr/lib/liburcu-cds.so.8
+f 0755 0:0 elf usr/lib/liburcu-common.so.8
+f 0755 0:0 elf usr/lib/liburcu.so.8
+f 0755 0:0 elf usr/lib/libuv.so.1
+f 0755 0:0 elf usr/lib/libz.so.1
+f 0755 0:0 elf usr/lib/ossl-modules/legacy.so
+f 0755 0:0 elf usr/local/bin/init
+f 0755 0:0 elf usr/sbin/named caps=cap_net_bind_service
+
+count 2 etc/ssl/
+count 1 run/
+count 624 usr/share/
+count 6 var/
