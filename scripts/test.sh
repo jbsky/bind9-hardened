@@ -76,6 +76,10 @@ check "named-checkconf accepts the valid config" \
 check "named-checkconf rejects an invalid config" \
   bash -c "! docker run --rm --entrypoint /usr/bin/named-checkconf -v '$WORKDIR/bad-conf:/etc/bind:ro' '$IMAGE' /etc/bind/named.conf"
 
+# Les quotes simples sont voulues : le corps est expanse par le `bash -c`
+# interne, avec "$CONTAINER" passe en argument positionnel -- pas par le shell
+# appelant. C'est ce que SC2016 signale, et ici c'est le comportement recherche.
+# shellcheck disable=SC2016
 check "container reports healthy" \
   bash -c '
     for _ in $(seq 1 15); do
