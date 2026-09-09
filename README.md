@@ -129,4 +129,15 @@ cosign verify ghcr.io/jbsky/bind9-hardened:9.20.27.9 \
 
 ## Licence
 
-MPL-2.0 (ISC BIND) / MIT (init.go)
+Le contenu de ce depot -- Dockerfile, `init.go`, scripts et chaine CI -- est
+sous **Apache-2.0**, voir [`LICENSE`](LICENSE). Copyright 2026 jbsky.
+Anterieurement MIT ; le depot n'ayant eu qu'un seul auteur humain, la
+relicence n'a demande l'accord de personne d'autre.
+
+Le logiciel embarque dans l'image garde le sien : **ISC BIND est sous
+MPL-2.0**, et les bibliotheques compilees depuis les sources gardent celle de
+leur amont. Les deux plans ne se melangent pas -- `init.go` est un programme
+distinct, qui execute `named` sans etre lie a ses bibliotheques.
+
+Contributions : voir [`CONTRIBUTING.md`](CONTRIBUTING.md), un `Signed-off-by`
+est demande.
