@@ -1,4 +1,4 @@
-# image-manifest v1
+# image-manifest v2
 # image : jbsky/bind9-hardened:latest
 # genere par scripts/image-manifest.py -- ne pas editer a la main
 
