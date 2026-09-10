@@ -590,10 +590,15 @@ FROM scratch
 ARG BIND_VERSION
 
 # OCI labels
+# `image.licenses` decrit le LOGICIEL EMBARQUE, pas ce depot (Apache-2.0, cf.
+# LICENSE). ISC BIND est en MPL-2.0 ; liburcu, compilee depuis les sources et
+# liee a named, est en LGPL-2.1-or-later -- elle manquait. Les autres
+# bibliotheques embarquees (jemalloc, zlib, libcap, libuv, json-c) sont
+# permissives et n ajoutent pas d obligation.
 LABEL org.opencontainers.image.title="bind9-hardened" \
       org.opencontainers.image.description="ISC BIND 9 DNS server -- FROM scratch, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
-      org.opencontainers.image.licenses="MPL-2.0" \
+      org.opencontainers.image.licenses="MPL-2.0 AND LGPL-2.1-or-later" \
       org.opencontainers.image.source="https://github.com/jbsky/bind9-hardened" \
       org.opencontainers.image.version="${BIND_VERSION}" \
       security.hardening.tier="platine" \
