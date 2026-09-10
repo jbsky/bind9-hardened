@@ -29,7 +29,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
 |-------|---------------|-------------------------|
-| `jbsky/bind9-hardened` | `9.20.27` | `9.20.27.9` |
+| `jbsky/bind9-hardened` | `9.20.27` | `9.20.27.10` |
 <!-- END:tags -->
 
 Ce tableau, les versions citees dans le texte et les tags qui apparaissent
@@ -53,7 +53,7 @@ docker run -d --name bind9 \
   -v /path/to/config:/etc/bind \
   -v /path/to/cache:/var/cache/bind \
   -p 53:53/udp -p 53:53/tcp \
-  jbsky/bind9-hardened:9.20.27.9
+  jbsky/bind9-hardened:9.20.27.10
 ```
 
 ## Configuration
@@ -72,7 +72,7 @@ Accepte toute reponse DNS valide (QR=1), meme REFUSED (quand `version "not discl
 ## Tests
 
 ```bash
-./scripts/test.sh jbsky/bind9-hardened:9.20.27.9 15353
+./scripts/test.sh jbsky/bind9-hardened:9.20.27.10 15353
 ```
 
 Lance un container jetable (config minimale, cache chown 5300) et verifie : demarrage, `named-checkconf` (config valide acceptee, invalide rejetee), statut `healthy`, healthcheck interne, et une vraie requete DNS UDP externe. Necessite `docker` + `python3`.
@@ -109,7 +109,7 @@ Stage 4: FROM scratch → Assemblage final (named + named-checkconf + init + tin
 ## Deploiement VyOS
 
 ```
-set container name bind9 image docker.io/jbsky/bind9-hardened:9.20.27.9
+set container name bind9 image docker.io/jbsky/bind9-hardened:9.20.27.10
 set container name bind9 capability net-bind-service
 set container name bind9 network bind9 address 172.20.2.10
 set container name bind9 volume bind-conf source /config/containers/bind9
@@ -122,7 +122,7 @@ set container name bind9 volume bind-cache destination /var/cache/bind
 
 ```bash
 # Verifier la signature cosign (OIDC keyless)
-cosign verify ghcr.io/jbsky/bind9-hardened:9.20.27.9 \
+cosign verify ghcr.io/jbsky/bind9-hardened:9.20.27.10 \
   --certificate-identity-regexp '^https://github.com/jbsky/bind9-hardened/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
