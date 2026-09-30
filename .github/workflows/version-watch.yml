@@ -60,6 +60,7 @@ jobs:
         if: steps.check.outputs.updated == 'true'
         env:
           NEW_VER: ${{ steps.check.outputs.version }}
+          PREV_VER: ${{ steps.check.outputs.previous }}
         run: |
           set -euo pipefail
 
@@ -67,6 +68,16 @@ jobs:
           mv versions.json.tmp versions.json
 
           sed -i "s/^ARG BIND_VERSION=.*/ARG BIND_VERSION=${NEW_VER}/" Dockerfile
+
+          # BIND installe ses bibliotheques sous le nom de la release
+          # (libdns-9.20.27.so), sans lien soname : le manifeste les nomme donc
+          # en toutes lettres. Sans cette ligne, chaque bump publie un commit
+          # que la porte « Image manifest » refuse -- 9.20.29 est reste trois
+          # semaines non publie ainsi (2026-09).
+          PREV_RE=$(printf '%s' "$PREV_VER" | sed 's/\./\\./g')
+          sed -i "s/-${PREV_RE}\.so\$/-${NEW_VER}.so/" image.manifest
+          grep -q -- "-${NEW_VER}\.so\$" image.manifest || {
+            echo "::error::image.manifest ne nomme aucune bibliotheque ${NEW_VER}"; exit 1; }
 
           echo "Updated to BIND ${NEW_VER}"
           cat versions.json
@@ -76,7 +87,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add versions.json Dockerfile
+          git add versions.json Dockerfile image.manifest
           git commit -m "chore(deps): bump bind ${{ steps.check.outputs.previous }} → ${{ steps.check.outputs.version }}"
           git push
 

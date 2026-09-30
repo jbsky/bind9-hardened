@@ -1,4 +1,4 @@
-# image-manifest v2
+# image-manifest v3
 # image : jbsky/bind9-hardened:latest
 # genere par scripts/image-manifest.py -- ne pas editer a la main
 
@@ -10,13 +10,13 @@ f 0755 0:0 elf sbin/tini
 f 0755 0:0 elf usr/bin/named-checkconf
 f 0755 0:0 elf usr/lib/libcap.so.2
 f 0755 0:0 elf usr/lib/libcrypto.so.3
-f 0755 0:0 elf usr/lib/libdns-9.20.27.so
-f 0755 0:0 elf usr/lib/libisc-9.20.27.so
-f 0755 0:0 elf usr/lib/libisccc-9.20.27.so
-f 0755 0:0 elf usr/lib/libisccfg-9.20.27.so
+f 0755 0:0 elf usr/lib/libdns-9.20.29.so
+f 0755 0:0 elf usr/lib/libisc-9.20.29.so
+f 0755 0:0 elf usr/lib/libisccc-9.20.29.so
+f 0755 0:0 elf usr/lib/libisccfg-9.20.29.so
 f 0755 0:0 elf usr/lib/libjemalloc.so.2
 f 0755 0:0 elf usr/lib/libjson-c.so.5
-f 0755 0:0 elf usr/lib/libns-9.20.27.so
+f 0755 0:0 elf usr/lib/libns-9.20.29.so
 f 0755 0:0 elf usr/lib/libssl.so.3
 f 0755 0:0 elf usr/lib/liburcu-cds.so.8
 f 0755 0:0 elf usr/lib/liburcu-common.so.8
