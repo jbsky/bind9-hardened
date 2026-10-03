@@ -4,37 +4,29 @@
 #
 # Tier: Platine (FROM scratch, non-root, setcap, binary healthcheck)
 # ============================================================================
-# ALPINE_VERSION / GO_VERSION kept for check-versions.sh reference only --
-# the FROM lines below pin tag+digest together as a literal so a version
-# bump requires deliberately re-resolving the digest, not a silent drift
-# if these ARGs change without the pins being updated to match.
-ARG ALPINE_VERSION=3.24
-ARG BIND_VERSION=9.20.29
-ARG GO_VERSION=1.26
+# Aucune version ici : versions.json est la seule source (cle `foo` -> ARG
+# FOO_VERSION, `foo_sha256` -> FOO_SHA256, `foo_tag` -> FOO_TAG). La CI passe
+# les build-args par jbsky/hardened-ci/versions, et le job lint refuse toute
+# valeur par defaut (scripts/versions-build-args.py --check). Un build nu
+# echoue aux gardes du stage builder. Pas d'ARG ALPINE_VERSION ni GO_VERSION :
+# les FROM epinglent tag ET digest en litteral (le tag alpine est compare a
+# .alpine) ; GO_VERSION n'etait lu nulle part.
 # jemalloc est compile depuis les sources, pas installe via apk : voir la note
 # devant sa compilation dans le stage builder.
-ARG JEMALLOC_VERSION=5.3.1
-ARG JEMALLOC_SHA256=3826bc80232f22ed5c4662f3034f799ca316e819103bdc7bb99018a421706f92
 # Bibliotheques runtime compilees depuis les sources. Chacune est verifiee par
 # la signature detachee de son amont, contre une empreinte epinglee ici : les
 # cles sont committees dans keys/, et importer une cle puis verifier avec cette
-# meme cle ne prouverait rien -- l'empreinte est le seul ancrage.
-ARG ZLIB_VERSION=1.3.2
+# meme cle ne prouverait rien -- l'empreinte est le seul ancrage. Les empreintes
+# (*_FPR) restent en dur par conception : ce sont des ancres de confiance, pas
+# des versions.
 ARG ZLIB_FPR=5ED46A6721D365587791E2AA783FCD8E58BCAFBA
-ARG URCU_VERSION=0.15.6
 ARG URCU_FPR=2A0B4ED915F2D3FA45F5B16217280A9781186ACF
-ARG LIBCAP_VERSION=2.78
 ARG LIBCAP_FPR=38A644698C69787344E954CE29EE848AE2CCF3F4
-ARG LIBUV_VERSION=1.52.1
 ARG LIBUV_FPR=612F0EAD9401622379DF4402F28C3C8DA33C03BE
 # json-c ne signe pas ses releases. Le sha256 est epingle, mais il n'a pas ete
 # calcule a l'aveugle : le tarball GitHub est identique, octet pour octet, a
 # celui qu'Alpine verifie de son cote -- et Alpine le recupere depuis un canal
 # different (S3), donc deux chemins independants concordent.
-ARG JSONC_VERSION=0.19
-ARG JSONC_TAG=json-c-0.19-20260627
-ARG JSONC_SHA256=37ad0249902e301bd9052bf712e511fcc6acff4ecaad4b5900aad9ce564e26de
-ARG OPENSSL_VERSION=3.5.9
 ARG OPENSSL_FPR=B146647E45A7B33947AB226B2A2C87D161692D40
 
 # ============================================================================
@@ -43,6 +35,10 @@ ARG OPENSSL_FPR=B146647E45A7B33947AB226B2A2C87D161692D40
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
 ARG BIND_VERSION
+# Gardes : un build-arg manquant echoue ici, avant toute compilation, au lieu
+# de construire une version vide (une par bloc d'ARG, pour garder le cache).
+RUN test -n "${BIND_VERSION}" \
+    || { echo "build-args requis depuis versions.json (jbsky/hardened-ci/versions, ou docker build \$(scripts/versions-build-args.py --docker) .)" >&2; exit 1; }
 
 # Compiler hardening flags (Full RELRO, PIE, SSP, FORTIFY_SOURCE)
 ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
@@ -109,6 +105,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
 # des deux cotes.
 ARG JEMALLOC_VERSION
 ARG JEMALLOC_SHA256
+RUN test -n "${JEMALLOC_VERSION}" -a -n "${JEMALLOC_SHA256}" \
+    || { echo "build-args requis depuis versions.json (jbsky/hardened-ci/versions, ou docker build \$(scripts/versions-build-args.py --docker) .)" >&2; exit 1; }
 WORKDIR /tmp/jemalloc
 RUN export CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
  && export LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack" \
@@ -143,17 +141,21 @@ COPY patches/openssl-auxv.patch /tmp/patches/openssl-auxv.patch
 
 ARG ZLIB_VERSION
 ARG ZLIB_FPR
-ARG URCU_VERSION
+ARG USERSPACE_RCU_VERSION
 ARG URCU_FPR
 ARG LIBCAP_VERSION
 ARG LIBCAP_FPR
 ARG LIBUV_VERSION
 ARG LIBUV_FPR
-ARG JSONC_VERSION
-ARG JSONC_TAG
-ARG JSONC_SHA256
+ARG JSON_C_VERSION
+ARG JSON_C_TAG
+ARG JSON_C_SHA256
 ARG OPENSSL_VERSION
 ARG OPENSSL_FPR
+RUN test -n "${ZLIB_VERSION}" -a -n "${USERSPACE_RCU_VERSION}" -a -n "${LIBCAP_VERSION}" \
+         -a -n "${LIBUV_VERSION}" -a -n "${JSON_C_VERSION}" -a -n "${JSON_C_TAG}" \
+         -a -n "${JSON_C_SHA256}" -a -n "${OPENSSL_VERSION}" \
+    || { echo "build-args requis depuis versions.json (jbsky/hardened-ci/versions, ou docker build \$(scripts/versions-build-args.py --docker) .)" >&2; exit 1; }
 
 # strip_inplace : `strip` s'appuie sur libbfd, qui lie libz.so.1 -- stripper
 # une bibliotheque EN PLACE alors que strip l'a mappee reecrit le fichier sous
@@ -185,8 +187,8 @@ RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
 # userspace-rcu
 # hadolint ignore=DL3003
 RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
- && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2" -o /tmp/urcu.tar.bz2 \
- && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${URCU_VERSION}.tar.bz2.asc" -o /tmp/urcu.tar.bz2.asc \
+ && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${USERSPACE_RCU_VERSION}.tar.bz2" -o /tmp/urcu.tar.bz2 \
+ && curl -fsSL "https://lttng.org/files/urcu/userspace-rcu-${USERSPACE_RCU_VERSION}.tar.bz2.asc" -o /tmp/urcu.tar.bz2.asc \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
  && gpg --batch --import /tmp/keys/urcu-efficios.gpg.asc \
  && gpg --batch --list-keys "${URCU_FPR}" > /dev/null \
@@ -260,9 +262,9 @@ RUN curl -fsSL "https://dist.libuv.org/dist/v${LIBUV_VERSION}/libuv-v${LIBUV_VER
 
 # json-c -- cmake. BIND ne s'en sert que pour la sortie de statistiques.
 # hadolint ignore=DL3003
-RUN curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSONC_TAG}/json-c-${JSONC_VERSION}.tar.gz" \
+RUN curl -fsSL "https://github.com/json-c/json-c/releases/download/${JSON_C_TAG}/json-c-${JSON_C_VERSION}.tar.gz" \
       -o /tmp/jsonc.tar.gz \
- && printf '%s  /tmp/jsonc.tar.gz\n' "${JSONC_SHA256}" > /tmp/jsonc.sha256 \
+ && printf '%s  /tmp/jsonc.tar.gz\n' "${JSON_C_SHA256}" > /tmp/jsonc.sha256 \
  && sha256sum -c /tmp/jsonc.sha256 \
  && mkdir -p /tmp/jsonc && tar -xzf /tmp/jsonc.tar.gz -C /tmp/jsonc --strip-components=1 \
  && cd /tmp/jsonc \

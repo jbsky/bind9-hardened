@@ -47,6 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # versions.json, seule source des versions du build : controle du depot
+      # (pas de build local ici, donc pas de copie du script : l'action l'apporte).
+      - name: versions.json, seule source
+        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+
       - name: Hadolint
         uses: hadolint/hadolint-action@v3.4.0
         with:
@@ -96,6 +101,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Build-args generes depuis versions.json (le controle tourne avec) :
+      # chaque docker/build-push-action du job doit les recevoir.
+      - name: Build-args depuis versions.json
+        id: build-args
+        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -108,6 +119,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          build-args: ${{ steps.build-args.outputs.build-args }}
           cache-from: type=gha,scope=bind9
           cache-to: type=gha,mode=max,scope=bind9
 
@@ -136,12 +148,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Read versions
-        id: versions
-        run: |
-          set -euo pipefail
-          BIND_VER=$(jq -r '.bind' versions.json)
-          echo "bind=${BIND_VER}" >> "$GITHUB_OUTPUT"
+      # Build-args generes depuis versions.json (le controle tourne avec) :
+      # chaque docker/build-push-action du job doit les recevoir.
+      - name: Build-args depuis versions.json
+        id: build-args
+        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -166,8 +177,7 @@ jobs:
           platforms: linux/amd64
           outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/{2},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE, env.IMAGE_NAME) || 'type=docker,dest=/tmp/image-tar/image.tar' }}
           tags: ${{ env.PUBLISH != 'true' && 'bind9-hardened:test' || '' }}
-          build-args: |
-            BIND_VERSION=${{ steps.versions.outputs.bind }}
+          build-args: ${{ steps.build-args.outputs.build-args }}
           sbom: ${{ env.PUBLISH }}
           provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
           cache-from: type=gha,scope=bind9-linux/amd64
@@ -201,8 +211,7 @@ jobs:
           load: true
           tags: ${{ env.IMAGE_NAME }}-prep:scan
           no-cache-filters: prep
-          build-args: |
-            BIND_VERSION=${{ steps.versions.outputs.bind }}
+          build-args: ${{ steps.build-args.outputs.build-args }}
           cache-from: type=gha,scope=bind9-linux/amd64
 
       - name: Trivy scan prep stage (report CRITICAL+HIGH)
@@ -360,12 +369,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Read versions
-        id: versions
-        run: |
-          set -euo pipefail
-          BIND_VER=$(jq -r '.bind' versions.json)
-          echo "bind=${BIND_VER}" >> "$GITHUB_OUTPUT"
+      # Build-args generes depuis versions.json (le controle tourne avec) :
+      # chaque docker/build-push-action du job doit les recevoir.
+      - name: Build-args depuis versions.json
+        id: build-args
+        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -388,8 +396,7 @@ jobs:
           platforms: linux/arm64
           sbom: true
           provenance: mode=max
-          build-args: |
-            BIND_VERSION=${{ steps.versions.outputs.bind }}
+          build-args: ${{ steps.build-args.outputs.build-args }}
           outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=bind9-linux/arm64
           cache-to: type=gha,mode=max,scope=bind9-linux/arm64

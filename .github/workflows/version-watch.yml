@@ -4,7 +4,7 @@
 #  Quotidien 06h00 UTC :
 #    1. Check ISC downloads for new 9.20.x stable version
 #    2. Compare with versions.json
-#    3. If update available: bump versions.json + Dockerfile ARG → commit → push
+#    3. If update available: bump versions.json (seule source ; le Dockerfile n'a plus de valeur par defaut) → commit → push
 #    4. Idem pour OpenSSL 3.5.x (compile depuis les sources, 2026-10-03)
 # =====================================================================
 name: version-watch
@@ -68,8 +68,6 @@ jobs:
           jq --arg v "$NEW_VER" '.bind = $v' versions.json > versions.json.tmp
           mv versions.json.tmp versions.json
 
-          sed -i "s/^ARG BIND_VERSION=.*/ARG BIND_VERSION=${NEW_VER}/" Dockerfile
-
           # BIND installe ses bibliotheques sous le nom de la release
           # (libdns-9.20.27.so), sans lien soname : le manifeste les nomme donc
           # en toutes lettres. Sans cette ligne, chaque bump publie un commit
@@ -104,7 +102,6 @@ jobs:
           fi
           jq --arg v "$LATEST" '.openssl = $v' versions.json > versions.json.tmp
           mv versions.json.tmp versions.json
-          sed -i "s/^ARG OPENSSL_VERSION=.*/ARG OPENSSL_VERSION=${LATEST}/" Dockerfile
           echo "updated=true" >> "$GITHUB_OUTPUT"
           echo "msg=openssl ${CURRENT} → ${LATEST}" >> "$GITHUB_OUTPUT"
 
@@ -118,7 +115,7 @@ jobs:
           MSG=$(printf '%s\n' "$BIND_MSG" "$OPENSSL_MSG" | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add versions.json Dockerfile image.manifest
+          git add versions.json image.manifest
           git commit -m "chore(deps): bump ${MSG}"
           git push
 
