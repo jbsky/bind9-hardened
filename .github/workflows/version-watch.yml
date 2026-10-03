@@ -5,6 +5,7 @@
 #    1. Check ISC downloads for new 9.20.x stable version
 #    2. Compare with versions.json
 #    3. If update available: bump versions.json + Dockerfile ARG → commit → push
+#    4. Idem pour OpenSSL 3.5.x (compile depuis les sources, 2026-10-03)
 # =====================================================================
 name: version-watch
 
@@ -82,17 +83,47 @@ jobs:
           echo "Updated to BIND ${NEW_VER}"
           cat versions.json
 
-      - name: Commit & push
-        if: steps.check.outputs.updated == 'true'
+      # OpenSSL est compile depuis les sources (signature verifiee contre
+      # l'empreinte OPENSSL_FPR) : rien ne le suivait, et 9.20.29.1 est sorti
+      # en 3.5.8 alors que 3.5.9 etait publie (2026-10-03). On reste sur la
+      # branche LTS 3.5 ; un changement de branche se fait a la main.
+      - name: Check & bump OpenSSL 3.5.x
+        id: openssl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          CURRENT=$(jq -r '.openssl' versions.json)
+          LATEST=$(gh api repos/openssl/openssl/tags --paginate --jq '.[].name' \
+            | grep -E '^openssl-3\.5\.[0-9]+$' | sed 's/^openssl-//' | sort -V | tail -1)
+          [[ "$LATEST" =~ ^3\.5\.[0-9]+$ ]] || { echo "::error::OpenSSL 3.5 illisible : '${LATEST}'"; exit 1; }
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "OpenSSL a jour (${CURRENT})"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          jq --arg v "$LATEST" '.openssl = $v' versions.json > versions.json.tmp
+          mv versions.json.tmp versions.json
+          sed -i "s/^ARG OPENSSL_VERSION=.*/ARG OPENSSL_VERSION=${LATEST}/" Dockerfile
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "msg=openssl ${CURRENT} → ${LATEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit & push
+        if: steps.check.outputs.updated == 'true' || steps.openssl.outputs.updated == 'true'
+        env:
+          BIND_MSG: ${{ steps.check.outputs.updated == 'true' && format('bind {0} → {1}', steps.check.outputs.previous, steps.check.outputs.version) || '' }}
+          OPENSSL_MSG: ${{ steps.openssl.outputs.msg }}
+        run: |
+          set -euo pipefail
+          MSG=$(printf '%s\n' "$BIND_MSG" "$OPENSSL_MSG" | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add versions.json Dockerfile image.manifest
-          git commit -m "chore(deps): bump bind ${{ steps.check.outputs.previous }} → ${{ steps.check.outputs.version }}"
+          git commit -m "chore(deps): bump ${MSG}"
           git push
 
       - name: Trigger build-push
-        if: steps.check.outputs.updated == 'true'
+        if: steps.check.outputs.updated == 'true' || steps.openssl.outputs.updated == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
