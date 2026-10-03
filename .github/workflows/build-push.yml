@@ -94,9 +94,19 @@ jobs:
 
   # -------------------------------------------------------------------
   validate:
-    name: Validate build (PR)
+    name: Validate build (PR, ${{ matrix.platform }})
     needs: lint
-    runs-on: ubuntu-latest
+    # Une plateforme par runner natif : sous QEMU, ce job reconstruisait
+    # arm64 en ~1 h 40 a chaque PR.
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v7
@@ -107,9 +117,6 @@ jobs:
         id: build-args
         uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -117,11 +124,11 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: false
           build-args: ${{ steps.build-args.outputs.build-args }}
-          cache-from: type=gha,scope=bind9
-          cache-to: type=gha,mode=max,scope=bind9
+          cache-from: type=gha,scope=bind9-validate-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=bind9-validate-${{ matrix.platform }}
 
   # -------------------------------------------------------------------
   #  Builds amd64 once. On a real push/tag (never on pull_request -- fork
@@ -352,8 +359,11 @@ jobs:
         run: ./scripts/test.sh bind9-hardened:test
 
   # -------------------------------------------------------------------
-  #  arm64 companion build -- cross-compiled via QEMU, can't be
-  #  functionally tested here, pushed by digest for promote to merge.
+  #  arm64 companion build -- sur un runner arm64 NATIF (ubuntu-24.04-arm,
+  #  gratuit pour un depot public), pushed by digest for promote to merge.
+  #  Sous QEMU un rebuild complet arm64 prenait 27 min (php) a 1 h 40
+  #  (bind9) et retardait d'autant chaque publication ; en natif, php
+  #  rebuild a froid en 2 min 43 (mesure du 2026-10-03).
   #  Independent of build/test (different platform, no shared artifact),
   #  so it runs in parallel with them rather than waiting on the amd64
   #  test to pass -- `promote` below still needs both `test` and this job
@@ -362,7 +372,7 @@ jobs:
   build-arm64:
     name: Build arm64
     needs: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     if: github.event_name != 'pull_request'
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -374,9 +384,6 @@ jobs:
       - name: Build-args depuis versions.json
         id: build-args
         uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -398,8 +405,8 @@ jobs:
           provenance: mode=max
           build-args: ${{ steps.build-args.outputs.build-args }}
           outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}",push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=bind9-linux/arm64
-          cache-to: type=gha,mode=max,scope=bind9-linux/arm64
+          cache-from: type=gha,scope=bind9-linux/arm64-natif
+          cache-to: type=gha,mode=max,scope=bind9-linux/arm64-natif
           # Meme raison que sur amd64, et une de plus : deux arches servies
           # depuis des caches d'ages differents publieraient des versions de
           # bibliotheques differentes sous un seul tag.
