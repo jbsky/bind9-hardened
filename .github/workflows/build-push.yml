@@ -50,7 +50,7 @@ jobs:
       # versions.json, seule source des versions du build : controle du depot
       # (pas de build local ici, donc pas de copie du script : l'action l'apporte).
       - name: versions.json, seule source
-        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
 
       - name: Hadolint
         uses: hadolint/hadolint-action@v3.4.0
@@ -105,7 +105,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -152,7 +152,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -373,7 +373,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@b839380b683ee323aaf622c94f69469689f291db # v0.6.0
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
