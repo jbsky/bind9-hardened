@@ -123,7 +123,8 @@ set container name bind9 volume bind-cache destination /var/cache/bind
 ```bash
 # Verifier la signature cosign (OIDC keyless)
 cosign verify ghcr.io/jbsky/bind9-hardened:9.20.29.3 \
-  --certificate-identity-regexp '^https://github.com/jbsky/bind9-hardened/' \
+  --certificate-identity-regexp '^https://github.com/(jbsky/bind9-hardened|jbsky/hardened-ci)/' \
+  --certificate-github-workflow-repository jbsky/bind9-hardened \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
