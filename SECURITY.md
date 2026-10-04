@@ -13,8 +13,8 @@ GHCR, and never retired the previous one. Only one semver tag (`9.20.24`) existe
 the time this was fixed, so there was no existing backlog to clean up here -- fixed
 proactively before it could accumulate, unlike the other `docker-hardened` repos.
 
-Fixed by `registry-cleanup.yml` (`scripts/prune-registry-tags.sh` for Docker Hub,
-`scripts/prune-ghcr-tags.sh` for GHCR), called as a job from `build-push.yml` after
+Fixed by `registry-cleanup.yml` (`prune-registry-tags.sh` (jbsky/hardened-ci) for Docker Hub,
+`prune-ghcr-tags.sh` (jbsky/hardened-ci) for GHCR), called as a job from `build-push.yml` after
 every push, and directly `workflow_dispatch`-able. Keeps the last 3 semver tags +
 `:latest`. Only ever deletes a package version by its own named tag -- untagged
 manifest-list children, attestations, and cosign signatures are left alone.
