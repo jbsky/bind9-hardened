@@ -1,0 +1,30 @@
+{
+  "image": "bind9-hardened",
+  "version": {
+    "key": "bind"
+  },
+  "revision": [
+    "bind",
+    "Dockerfile",
+    "init.go",
+    "go.mod",
+    "keys/",
+    "patches/",
+    "strip-inplace.sh",
+    "versions.json"
+  ],
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "validate_on_pr": true,
+  "probes": [
+    {
+      "label": "BIND",
+      "want": "version",
+      "cmd": "docker run --rm --entrypoint named \"$IMAGE\" -v",
+      "regex": "BIND \\K[0-9][0-9.]*"
+    }
+  ],
+  "smoke": "./scripts/test.sh \"$IMAGE\""
+}
