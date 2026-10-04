@@ -169,9 +169,13 @@ ENV SRCLIB_CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIC -
 
 # zlib
 # hadolint ignore=DL3003
+# zlib depuis les releases GitHub de son auteur, pas zlib.net : le 2026-10-04 zlib.net a
+# coupe la connexion (curl 56) puis servi une page HTML a la place de la signature aux
+# runners GitHub (deux echecs arm64). Archive identique a l'octet ; l'integrite repose
+# toujours sur la signature verifiee contre l'empreinte epinglee (ZLIB_FPR).
 RUN export CFLAGS="$SRCLIB_CFLAGS" LDFLAGS="$SRCLIB_LDFLAGS" \
- && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" -o /tmp/zlib.tar.gz \
- && curl -fsSL "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz.asc" -o /tmp/zlib.tar.gz.asc \
+ && curl -fsSL "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz" -o /tmp/zlib.tar.gz \
+ && curl -fsSL "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz.asc" -o /tmp/zlib.tar.gz.asc \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
  && gpg --batch --import /tmp/keys/zlib-madler.gpg.asc \
  && gpg --batch --list-keys "${ZLIB_FPR}" > /dev/null \
