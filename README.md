@@ -33,7 +33,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 <!-- END:tags -->
 
 Ce tableau, les versions citees dans le texte et les tags qui apparaissent
-dans les exemples sont tous rendus par `scripts/update-readme-tags.sh` apres
+dans les exemples sont tous rendus par `update-readme-tags.sh` (jbsky/hardened-ci) apres
 chaque publication -- ne rien editer a la main.
 
 Le compteur compte les commits qui touchent les inputs de l'image (`Dockerfile`, `init.go`, `go.mod`, `versions.json`)
