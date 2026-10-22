@@ -32,7 +32,7 @@ ARG OPENSSL_FPR=B146647E45A7B33947AB226B2A2C87D161692D40
 # ============================================================================
 # Stage 1: builder -- compile BIND from ISC source with hardening flags
 # ============================================================================
-FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS builder
+FROM alpine:3.24@sha256:71e9b7bae160ba167fa17414401b94cbcdaf3c32feeab9298bd794a2a0614c35 AS builder
 
 ARG BIND_VERSION
 # Gardes : un build-arg manquant echoue ici, avant toute compilation, au lieu
@@ -448,7 +448,7 @@ RUN rm -f \
 # ============================================================================
 # Stage 2: Go builder -- init binary (healthcheck + entrypoint + setup-dirs)
 # ============================================================================
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS gobuilder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d530cf60723abf1ffae0cd16bb546b379ec0550d2f3815e5b16ed69dbc00fba4 AS gobuilder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -460,7 +460,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags='-s -w
 # ============================================================================
 # Stage 3: prep -- assemble complete runtime filesystem
 # ============================================================================
-FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS prep
+FROM alpine:3.24@sha256:71e9b7bae160ba167fa17414401b94cbcdaf3c32feeab9298bd794a2a0614c35 AS prep
 
 ARG BIND_VERSION
 
