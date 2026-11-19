@@ -1,30 +1,62 @@
-# BIND9 Hardened
+# BIND 9 Hardened
 
 [![Build](https://github.com/jbsky/bind9-hardened/actions/workflows/build-push.yml/badge.svg)](https://github.com/jbsky/bind9-hardened/actions/workflows/build-push.yml)
 [![Docker Hub](https://img.shields.io/docker/v/jbsky/bind9-hardened?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/jbsky/bind9-hardened)
-[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/bind9-hardened#security--verification)
+[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/bind9-hardened#hardening)
 
-Image Docker ISC BIND <!--v:bind9-hardened-->9.20.31<!--/v--> hardenee (FROM scratch, Go init, tini PID 1), optimisee pour deploiement VyOS Podman.
+ISC BIND <!--v:bind9-hardened-->9.20.31<!--/v--> built from source, in a `FROM scratch`
+image: no shell, no package manager, no OS. Only `named`, `named-checkconf`,
+their libraries, `tini` and a static Go init -- about 19 MB, against ~150 MB
+for the official Ubuntu-based image. Meant for a Podman deployment on VyOS.
 
-## Features
+## What is built
 
-| Feature | Detail |
-|---------|--------|
-| FROM scratch | Zero shell, zero package manager, zero attack surface |
-| Non-root | UID 5300 avec file capability (`cap_net_bind_service+ep`) |
-| Compiler hardening | RELRO, PIE, SSP, FORTIFY_SOURCE, NX, stack-clash |
-| Go static init | Healthcheck DNS query + named-checkconf validation |
-| tini PID 1 | Signal forwarding + zombie reaping |
-| 19 MB | vs ~150 MB image Ubuntu upstream |
-| DNSSEC validation | Trust anchors compiles dans le binaire |
+- **BIND**: ISC's release tarball, verified against ISC's PGP key
+  ([`keys/`](keys)), configured with:
+
+  ```
+  --prefix=/usr --sysconfdir=/etc/bind --localstatedir=/var
+  --with-openssl --without-libxml2 --with-json-c --with-zlib --with-jemalloc
+  --disable-doh --disable-static
+  --without-gssapi --without-libidn2 --without-readline --without-cmocka
+  ```
+
+- **Runtime libraries built from source** rather than taken from Alpine:
+  OpenSSL, zlib, userspace-rcu, libcap, libuv, json-c and jemalloc. Each is
+  verified against its upstream's detached signature with a fingerprint
+  pinned in the Dockerfile (keys committed in [`keys/`](keys)), or against a
+  pinned sha256 when upstream does not sign (json-c, jemalloc). OpenSSL
+  carries one patch ([`patches/`](patches)): CPU feature detection through
+  the auxiliary vector on musl.
+- **DNSSEC validation**: the trust anchors are compiled into the binary.
+
+## Hardening
+
+Tier **platine** (OCI label `security.hardening.tier`): a `FROM scratch` image
+with no shell and no package manager, a non-root user, a static Go init behind
+`tini` as PID 1, and binaries built with hardening flags.
+
+- Non-root user `5300:5300`; `named` carries the file capability
+  `cap_net_bind_service+ep`, the only privilege it needs to bind port 53.
+- Compiler flags: PIE, full RELRO, `-fstack-protector-strong`,
+  `-fstack-clash-protection`, `_FORTIFY_SOURCE=2`, non-executable stack;
+  stripped binaries ([`strip-inplace.sh`](strip-inplace.sh)).
+- Libraries copied from a dependency closure resolved at build time
+  (`lddtree`), never `/lib` or `/usr/lib` wholesale.
+- The init validates the configuration (`named-checkconf`) **before**
+  starting: a broken configuration prevents the start, instead of breaking
+  DNS for the whole network.
+- The healthcheck is a **real DNS query** (see [Usage](#usage)), not a TCP
+  connect.
 
 ## Tags
 
-Trois tags par image : `latest` (dernier build de `main`), la version amont
-seule, et la version amont suffixee d'un **compteur de revision**. Les deux
-premiers sont **reecrits en place** a chaque rebuild -- bump Alpine, correctif
-CVE, changement de config -- et le build qu'ils designaient devient alors
-inaccessible. **En production, epinglez le tag qui porte le compteur.**
+Every image is published under three tags: `latest` (last build of `main`),
+the upstream version alone, and the upstream version followed by a **revision
+counter**. The first two are **overwritten in place** on every rebuild (Alpine
+update, CVE fix, configuration change), and the build they pointed to can no
+longer be pulled by them. **In production, pin the tag that carries the
+counter.**
 
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
@@ -32,20 +64,24 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 | `jbsky/bind9-hardened` | `9.20.31` | `9.20.31.0` |
 <!-- END:tags -->
 
-Ce tableau, les versions citees dans le texte et les tags qui apparaissent
-dans les exemples sont tous rendus par `update-readme-tags.sh` (jbsky/hardened-ci) apres
-chaque publication -- ne rien editer a la main.
+This table, the versions quoted in the text and the tags in the examples are
+rendered by `update-readme-tags.sh` ([hardened-ci](https://github.com/jbsky/hardened-ci))
+after each publication: do not edit them by hand.
 
-Le compteur compte les commits qui touchent les inputs de l'image (`Dockerfile`, `init.go`, `go.mod`, `versions.json`)
-depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
-version amont. Un commit qui ne touche que `.github/` ne l'incremente pas.
+The counter counts the commits that touch the image inputs (the `revision`
+list of [`.github/hardened-ci.json`](.github/hardened-ci.json)) since the last
+upstream version change, and restarts at `0` with each new upstream version. A
+commit that only touches `.github/` does not increment it.
 
-Les deux registres, `docker.io` et `ghcr.io`, publient les memes tags avec le
-meme digest.
+`docker.io` and `ghcr.io` publish the same tags with the same digest, for
+`linux/amd64` and `linux/arm64`. Each registry keeps the last six immutable
+tags of an image, so that superseded builds do not stay pullable: move your
+pin forward.
 
-L'image finale fait ~19 MB (`FROM scratch`).
+`version-watch` checks ISC daily for a new 9.20 release (and OpenSSL for a new
+3.5 release), bumps `versions.json` and republishes.
 
-## Usage rapide
+## Usage
 
 ```bash
 docker run -d --name bind9 \
@@ -56,57 +92,23 @@ docker run -d --name bind9 \
   jbsky/bind9-hardened:9.20.31.0
 ```
 
-## Configuration
+- The cache directory must be writable by uid `5300`
+  (`chown -R 5300:5300 /path/to/cache`).
+- Arguments that do not start with `named` get it put in front by the init
+  (VyOS passes raw arguments that override the image `CMD`).
+- **Healthcheck**: the init sends a real UDP DNS query to `127.0.0.1:53`
+  (`CH TXT version.bind`), which proves the whole DNS pipeline works. Any
+  valid DNS response (QR=1) is accepted, even REFUSED (when
+  `version "not disclosed"` is configured).
 
-| Variable d'env | Default | Description |
-|---------------|---------|-------------|
-| `NAMED_CONF` | `/etc/bind/named.conf` | Chemin du fichier de config |
-| `TZ` | `Europe/Paris` | Timezone |
+### Configuration
 
-## Healthcheck
+| Environment variable | Default | Description |
+|---|---|---|
+| `NAMED_CONF` | `/etc/bind/named.conf` | File validated by `named-checkconf` before start; the image `CMD` passes the same path to `named -c` |
+| `TZ` | `Europe/Paris` | Time zone |
 
-Le Go init effectue une **requete DNS UDP reelle** vers `127.0.0.1:53` (CH TXT version.bind). Contrairement a un TCP connect, cela prouve que le pipeline DNS complet fonctionne.
-
-Accepte toute reponse DNS valide (QR=1), meme REFUSED (quand `version "not disclosed"` est configure).
-
-## Tests
-
-```bash
-./scripts/test.sh jbsky/bind9-hardened:9.20.31.0 15353
-```
-
-Lance un container jetable (config minimale, cache chown 5300) et verifie : demarrage, `named-checkconf` (config valide acceptee, invalide rejetee), statut `healthy`, healthcheck interne, et une vraie requete DNS UDP externe. Necessite `docker` + `python3`.
-
-## Architecture du repo
-
-```
-bind9-hardened/
-├── Dockerfile          # Multi-stage 4 stages (builder → gobuilder → prep → scratch)
-├── go.mod + init.go    # Go static init (healthcheck DNS + checkconf + entrypoint)
-├── keys/               # Cle PGP ISC pinnee (verification tarball source)
-├── scripts/test.sh     # Smoke tests
-└── .dockerignore
-```
-
-## Build multi-stage
-
-```
-Stage 1: builder      → Compile ISC BIND from source (autoconf, hardening flags)
-Stage 2: gobuilder    → CGO_ENABLED=0 Go static init binary
-Stage 3: prep         → Runtime libs + tini + user 5300 + setcap cap_net_bind_service
-Stage 4: FROM scratch → Assemblage final (named + named-checkconf + init + tini = 19 MB)
-```
-
-### Configure flags
-
-```
---prefix=/usr --sysconfdir=/etc/bind --localstatedir=/var
---with-openssl --without-libxml2 --with-json-c --with-zlib --with-jemalloc
---disable-doh --disable-static
---without-gssapi --without-libidn2 --without-readline --without-cmocka
-```
-
-## Deploiement VyOS
+### VyOS
 
 ```
 set container name bind9 image docker.io/jbsky/bind9-hardened:9.20.31.0
@@ -118,27 +120,69 @@ set container name bind9 volume bind-cache source /config/containers/bind9-cache
 set container name bind9 volume bind-cache destination /var/cache/bind
 ```
 
-## Security & Verification
+## Build and test
 
 ```bash
-# Verifier la signature cosign (OIDC keyless)
+docker build $(python3 ../hardened-ci/scripts/versions-build-args.py --docker) -t bind9-hardened:test .
+./scripts/test.sh bind9-hardened:test 15353
+```
+
+The build-args generator lives in a checkout of
+[hardened-ci](https://github.com/jbsky/hardened-ci) next to this repository.
+`scripts/test.sh` starts a throwaway container (minimal configuration, cache
+owned by `5300`) and checks the start, `named-checkconf` (valid configuration
+accepted, invalid one rejected), the `healthy` status, the internal
+healthcheck, and a real UDP DNS query from outside. Requires `docker` and
+`python3`.
+
+Versions live only in [`versions.json`](versions.json): the Dockerfile has no
+defaults, CI passes them through `versions-build-args.py`, and a bare
+`docker build` stops at the guard.
+
+## Verification
+
+Images are signed with [cosign](https://github.com/sigstore/cosign) (keyless,
+GitHub OIDC) by the shared [hardened-ci](https://github.com/jbsky/hardened-ci)
+pipeline. The certificate names that workflow and, in an extension, this
+repository: the commands below require both.
+
+```bash
+# ghcr.io
 cosign verify ghcr.io/jbsky/bind9-hardened:9.20.31.0 \
+  --certificate-identity-regexp '^https://github.com/(jbsky/bind9-hardened|jbsky/hardened-ci)/' \
+  --certificate-github-workflow-repository jbsky/bind9-hardened \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Docker Hub (the signature is stored on ghcr.io)
+COSIGN_REPOSITORY=ghcr.io/jbsky/bind9-hardened \
+  cosign verify docker.io/jbsky/bind9-hardened:9.20.31.0 \
   --certificate-identity-regexp '^https://github.com/(jbsky/bind9-hardened|jbsky/hardened-ci)/' \
   --certificate-github-workflow-repository jbsky/bind9-hardened \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-## Licence
+Each published digest also carries a CycloneDX SBOM (the `prep` stage the
+image is assembled from, plus its Go binaries), attested with cosign, and a
+GitHub SLSA build provenance attestation. The pipeline lints, builds, scans the
+`prep` stage with Trivy, tests the exact digest it is about to publish (image
+manifest, dependency closure, functional tests), then promotes and signs it;
+pull requests also build both architectures, each on its native runner. Base
+image digests follow upstream daily (`base-watch`), a fixable Alpine package
+CVE triggers a rebuild (`cve-watch`), and the published image is audited
+weekly (`security-audit`: Trivy, Grype, cosign). Audit status and documented
+exceptions: [`SECURITY.md`](SECURITY.md).
 
-Le contenu de ce depot -- Dockerfile, `init.go`, scripts et chaine CI -- est
-sous **Apache-2.0**, voir [`LICENSE`](LICENSE). Copyright 2026 jbsky.
-Anterieurement MIT ; le depot n'ayant eu qu'un seul auteur humain, la
-relicence n'a demande l'accord de personne d'autre.
+## License
 
-Le logiciel embarque dans l'image garde le sien : **ISC BIND est sous
-MPL-2.0**, et les bibliotheques compilees depuis les sources gardent celle de
-leur amont. Les deux plans ne se melangent pas -- `init.go` est un programme
-distinct, qui execute `named` sans etre lie a ses bibliotheques.
+The contents of this repository (Dockerfile, `init.go`, scripts and CI) are
+licensed under **Apache-2.0**, see [`LICENSE`](LICENSE). Copyright 2026 jbsky.
+Previously MIT; the repository having had a single human author, the
+relicensing required nobody else's consent.
 
-Contributions : voir [`CONTRIBUTING.md`](CONTRIBUTING.md), un `Signed-off-by`
-est demande.
+The software shipped in the image keeps its own license: **ISC BIND is under
+MPL-2.0**, and the libraries built from source keep their upstream's. The two
+never mix: `init.go` is a separate program that executes `named` without being
+linked to its libraries.
+
+Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md); a `Signed-off-by` is
+required.
